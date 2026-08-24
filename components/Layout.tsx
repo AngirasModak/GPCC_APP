@@ -1,0 +1,2 @@
+import Link from "next/link";
+export default function Layout({children}:{children:React.ReactNode}){return <main style={{maxWidth:1200,margin:"auto",padding:24,fontFamily:"Arial"}}><header style={{paddingBottom:18,borderBottom:"2px solid #146c43"}}><b style={{fontSize:22}}>GREENWOOD PARK CULTURAL COMMITTEE</b><div>Centralized Finance & Governance Portal</div><nav style={{marginTop:10}}><Link href="/">Home</Link> | <Link href="/dashboard">Dashboard</Link> | <Link href="/login">Login</Link></nav></header>{children}</main>}

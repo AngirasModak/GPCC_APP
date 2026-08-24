@@ -1,0 +1,1 @@
+{"name":"gpcc-finance","private":true,"scripts":{"dev":"next dev","build":"next build"},"dependencies":{"@supabase/ssr":"latest","@supabase/supabase-js":"latest","next":"latest","react":"latest","react-dom":"latest","xlsx":"latest"},"devDependencies":{"@types/node":"26.2.0","@types/react":"19.2.18","typescript":"7.0.2"}}

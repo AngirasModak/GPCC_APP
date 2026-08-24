@@ -1,0 +1,1 @@
+import Layout from "../components/Layout";export default function Root({children}:{children:React.ReactNode}){return <html><body style={{margin:0,background:"#f4f7f5"}}><Layout>{children}</Layout></body></html>}
