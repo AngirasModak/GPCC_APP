@@ -1,1 +1,2 @@
-import Layout from "../components/Layout";export default function Root({children}:{children:React.ReactNode}){return <html><body style={{margin:0,background:"#f4f7f5"}}><Layout>{children}</Layout></body></html>}
+import "./globals.css";import AppShell from "../components/AppShell";
+export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="en"><body><AppShell>{children}</AppShell></body></html>}
