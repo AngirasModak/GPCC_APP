@@ -18,10 +18,22 @@ export default function PettyCashPage(){
     return;
   }
 
-  const payload = {
-    ...form,
-    amount: Number(form.amount),
-  };
+const isInflow = [
+  "Withdrawal",
+  "Bank Withdrawal",
+  "Cash Receipt",
+].includes(form.type);
+
+const payload = {
+  date: form.date,
+  requisition_no: form.requisition_no,
+  type: form.type,
+  particulars: form.particulars,
+  reference: form.reference,
+  amount: Number(form.amount),
+  remarks: form.remarks,
+  direction: isInflow ? "IN" : "OUT",
+};
 
   let error: any;
 
