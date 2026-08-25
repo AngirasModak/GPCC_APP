@@ -235,11 +235,7 @@ export default function Dashboard() {
       } = await supabase
         .from("fund_transfers")
         .select("*")
-        .is("deleted_at", null)
-        .in("status", [
-          "Cleared",
-          "Completed",
-        ]);
+        .is("deleted_at", null);
 
       if (transferError) {
         throw new Error(
