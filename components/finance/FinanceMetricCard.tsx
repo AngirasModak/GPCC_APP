@@ -1,43 +1,29 @@
-import React, { ReactNode } from "react";
+import React from "react";
 
-type MetricAccent =
-  | "primary"
-  | "success"
-  | "warning"
-  | "danger"
-  | "neutral"
-  | "info"
-  | "purple"
-  | "blue"
-  | "green"
-  | "amber"
-  | "red";
-
-type TrendDirection =
-  | "up"
-  | "down"
-  | "neutral"
-  | "positive"
-  | "negative";
-
-type FinanceMetricCardProps = {
+export interface FinanceMetricCardProps {
+  /** Supports both existing naming conventions */
   label?: string;
   title?: string;
 
-  value: string;
+  value: React.ReactNode;
 
   description?: string;
   subtitle?: string;
 
-  icon?: ReactNode;
+  icon?: React.ReactNode;
 
-  accent?: MetricAccent;
-  tone?: MetricAccent;
+  /** Supports existing pages */
+  accent?: string;
+  tone?: string;
 
-  trend?: string;
+  trend?: React.ReactNode;
 
-  trendDirection?: TrendDirection;
-};
+  trendDirection?:
+    | "up"
+    | "down"
+    | "neutral"
+    | string;
+}
 
 export default function FinanceMetricCard({
   label,
@@ -51,67 +37,46 @@ export default function FinanceMetricCard({
   trend,
   trendDirection = "neutral",
 }: FinanceMetricCardProps) {
-  const displayTitle = label ?? title ?? "";
-  const displayDescription =
-    description ?? subtitle ?? "";
+  const heading = label || title || "";
 
-  const displayAccent =
-    accent ?? tone ?? "primary";
-
-  const trendClass =
-    trendDirection === "up" ||
-    trendDirection === "positive"
-      ? "is-positive"
-      : trendDirection === "down" ||
-          trendDirection === "negative"
-        ? "is-negative"
-        : "is-neutral";
+  const theme =
+    accent ||
+    tone ||
+    "primary";
 
   return (
-    <div
-      className={`financeMetricCard financeMetricCard--${displayAccent}`}
+    <article
+      className={`finance-metric-card finance-metric-card--${theme}`}
     >
-      <div className="financeMetricCard__top">
-        <div>
-          <div className="financeMetricCard__label">
-            {displayTitle}
-          </div>
-
-          {displayDescription && (
-            <div className="financeMetricCard__description">
-              {displayDescription}
-            </div>
-          )}
+      <div className="finance-metric-card__top">
+        <div className="finance-metric-card__icon">
+          {icon}
         </div>
 
-        {icon && (
-          <div className="financeMetricCard__icon">
-            {icon}
+        {trend && (
+          <div
+            className={`finance-metric-card__trend finance-metric-card__trend--${trendDirection}`}
+          >
+            {trend}
           </div>
         )}
       </div>
 
-      <div className="financeMetricCard__value">
-        {value}
-      </div>
-
-      {trend && (
-        <div
-          className={`financeMetricCard__trend ${trendClass}`}
-        >
-          <span>
-            {trendDirection === "up" ||
-            trendDirection === "positive"
-              ? "↑"
-              : trendDirection === "down" ||
-                  trendDirection === "negative"
-                ? "↓"
-                : "•"}
-          </span>
-
-          {trend}
+      <div className="finance-metric-card__content">
+        <div className="finance-metric-card__label">
+          {heading}
         </div>
-      )}
-    </div>
+
+        <div className="finance-metric-card__value">
+          {value}
+        </div>
+
+        {(description || subtitle) && (
+          <div className="finance-metric-card__description">
+            {description || subtitle}
+          </div>
+        )}
+      </div>
+    </article>
   );
 }

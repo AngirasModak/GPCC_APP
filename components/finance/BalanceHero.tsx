@@ -1,36 +1,38 @@
-import React, { ReactNode } from "react";
+import React from "react";
 
-export type BalanceHeroVariant =
-  | "danger"
-  | "neutral"
-  | "primary"
-  | "success"
-  | "warning"
-  | "blue"
-  | "amber"
-  | "green";
-
-type BalanceHeroProps = {
+export interface BalanceHeroProps {
   eyebrow?: string;
+
   title: string;
-  amount?: string;
-  value?: string;
+
+  amount?: React.ReactNode;
+  value?: React.ReactNode;
+
   description?: string;
-  icon?: ReactNode;
+
+  icon?: React.ReactNode;
 
   trend?: {
-    label: string;
+    label: React.ReactNode;
     positive?: boolean;
   };
 
-  variant?: BalanceHeroVariant;
+  variant?:
+    | "primary"
+    | "success"
+    | "warning"
+    | "danger"
+    | "neutral"
+    | "blue"
+    | "green"
+    | "amber";
 
   primaryLabel?: string;
-  primaryValue?: string;
+  primaryValue?: React.ReactNode;
 
   secondaryLabel?: string;
-  secondaryValue?: string;
-};
+  secondaryValue?: React.ReactNode;
+}
 
 export default function BalanceHero({
   eyebrow,
@@ -46,86 +48,89 @@ export default function BalanceHero({
   secondaryLabel,
   secondaryValue,
 }: BalanceHeroProps) {
-  const displayValue = amount ?? value ?? "";
+  const displayAmount = amount ?? value;
+
+  const normalizedVariant =
+    variant === "blue"
+      ? "primary"
+      : variant === "green"
+      ? "success"
+      : variant === "amber"
+      ? "warning"
+      : variant;
 
   return (
     <section
-      className={`balanceHero balanceHero--${variant}`}
+      className={`balance-hero balance-hero--${normalizedVariant}`}
     >
-      <div className="balanceHero__content">
-        {eyebrow && (
-          <div className="balanceHero__eyebrow">
-            {eyebrow}
+      <div className="balance-hero__background" />
+
+      <div className="balance-hero__content">
+        <div className="balance-hero__main">
+          {eyebrow && (
+            <div className="balance-hero__eyebrow">
+              {eyebrow}
+            </div>
+          )}
+
+          <div className="balance-hero__title-row">
+            <div>
+              <h2>{title}</h2>
+
+              <div className="balance-hero__amount">
+                {displayAmount}
+              </div>
+
+              {description && (
+                <p>{description}</p>
+              )}
+            </div>
+
+            {icon && (
+              <div className="balance-hero__icon">
+                {icon}
+              </div>
+            )}
           </div>
-        )}
 
-        <h2 className="balanceHero__title">
-          {title}
-        </h2>
-
-        {description && (
-          <p className="balanceHero__description">
-            {description}
-          </p>
-        )}
-
-        <div className="balanceHero__amount">
-          {displayValue}
+          {trend && (
+            <div
+              className={`balance-hero__trend ${
+                trend.positive
+                  ? "balance-hero__trend--positive"
+                  : "balance-hero__trend--negative"
+              }`}
+            >
+              {trend.label}
+            </div>
+          )}
         </div>
 
-        {trend && (
-          <div
-            className={`balanceHero__trend ${
-              trend.positive === false
-                ? "is-negative"
-                : "is-positive"
-            }`}
-          >
-            <span>
-              {trend.positive === false
-                ? "↓"
-                : "↑"}
-            </span>
-
-            {trend.label}
-          </div>
-        )}
-
         {(primaryLabel ||
-          primaryValue ||
-          secondaryLabel ||
-          secondaryValue) && (
-          <div className="balanceHero__breakdown">
-            <div className="balanceHero__breakdownItem">
-              <span className="balanceHero__breakdownLabel">
-                {primaryLabel}
-              </span>
+          secondaryLabel) && (
+          <div className="balance-hero__breakdown">
+            {primaryLabel && (
+              <div className="balance-hero__breakdown-item">
+                <span>{primaryLabel}</span>
 
-              <strong className="balanceHero__breakdownValue">
-                {primaryValue}
-              </strong>
-            </div>
+                <strong>
+                  {primaryValue}
+                </strong>
+              </div>
+            )}
 
-            <div className="balanceHero__divider" />
+            {secondaryLabel && (
+              <div className="balance-hero__breakdown-item">
+                <span>{secondaryLabel}</span>
 
-            <div className="balanceHero__breakdownItem">
-              <span className="balanceHero__breakdownLabel">
-                {secondaryLabel}
-              </span>
-
-              <strong className="balanceHero__breakdownValue">
-                {secondaryValue}
-              </strong>
-            </div>
+                <strong>
+                  {secondaryValue}
+                </strong>
+              </div>
+            )}
           </div>
         )}
       </div>
-
-      {icon && (
-        <div className="balanceHero__icon">
-          {icon}
-        </div>
-      )}
     </section>
   );
 }

@@ -1,11 +1,17 @@
-import { ReactNode } from "react";
+import React from "react";
 
-interface FinancePageHeaderProps {
+export interface FinancePageHeaderProps {
   eyebrow?: string;
   title: string;
   description?: string;
-  badge?: ReactNode;
-  action?: ReactNode;
+
+  badge?: React.ReactNode;
+
+  /** Single primary action */
+  action?: React.ReactNode;
+
+  /** Multiple actions */
+  actions?: React.ReactNode;
 }
 
 export default function FinancePageHeader({
@@ -14,36 +20,40 @@ export default function FinancePageHeader({
   description,
   badge,
   action,
+  actions,
 }: FinancePageHeaderProps) {
   return (
-    <div className="mb-8 flex flex-col gap-5 border-b border-slate-200 pb-6 lg:flex-row lg:items-end lg:justify-between">
-      <div className="space-y-2">
+    <section className="finance-page-header">
+      <div className="finance-page-header__content">
         {eyebrow && (
-          <p className="text-xs font-semibold tracking-[0.16em] text-slate-500 uppercase">
+          <div className="finance-page-header__eyebrow">
             {eyebrow}
-          </p>
+          </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-            {title}
-          </h1>
+        <div className="finance-page-header__title-row">
+          <div>
+            <h1>{title}</h1>
 
-          {badge}
+            {description && (
+              <p>{description}</p>
+            )}
+          </div>
+
+          {badge && (
+            <div className="finance-page-header__badge">
+              {badge}
+            </div>
+          )}
         </div>
-
-        {description && (
-          <p className="max-w-2xl text-sm leading-6 text-slate-600">
-            {description}
-          </p>
-        )}
       </div>
 
-      {action && (
-        <div className="flex items-center gap-3">
+      {(action || actions) && (
+        <div className="finance-page-header__actions">
           {action}
+          {actions}
         </div>
       )}
-    </div>
+    </section>
   );
 }

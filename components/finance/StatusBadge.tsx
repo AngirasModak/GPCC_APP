@@ -1,47 +1,53 @@
-import { ReactNode } from "react";
+import React from "react";
 
-type StatusVariant =
-  | "default"
-  | "success"
-  | "warning"
-  | "danger"
-  | "info"
+export type TransactionStatus =
   | string;
 
-interface StatusBadgeProps {
-  status: string;
-  variant?: StatusVariant;
-  icon?: ReactNode;
+export interface StatusBadgeProps {
+  status: TransactionStatus;
+
+  variant?:
+    | "success"
+    | "warning"
+    | "danger"
+    | "primary"
+    | "neutral";
 }
 
 export default function StatusBadge({
   status,
-  variant = "default",
-  icon,
+  variant,
 }: StatusBadgeProps) {
-  const variantClasses: Record<string, string> = {
-    default: "bg-slate-100 text-slate-700 border-slate-200",
-    success: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    warning: "bg-amber-50 text-amber-700 border-amber-200",
-    danger: "bg-rose-50 text-rose-700 border-rose-200",
-    info: "bg-blue-50 text-blue-700 border-blue-200",
+  const normalizedStatus =
+    String(status)
+      .toLowerCase()
+      .trim();
 
-    Paid: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    Cleared: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    Pending: "bg-amber-50 text-amber-700 border-amber-200",
-    Cancelled: "bg-rose-50 text-rose-700 border-rose-200",
-  };
+  const autoVariant =
+    normalizedStatus.includes("paid") ||
+    normalizedStatus.includes("cleared") ||
+    normalizedStatus.includes("completed") ||
+    normalizedStatus.includes("live") ||
+    normalizedStatus.includes("received")
+      ? "success"
+      : normalizedStatus.includes("pending") ||
+        normalizedStatus.includes("processing")
+      ? "warning"
+      : normalizedStatus.includes("failed") ||
+        normalizedStatus.includes("cancelled") ||
+        normalizedStatus.includes("overdue")
+      ? "danger"
+      : "neutral";
 
-  const classes =
-    variantClasses[variant] ??
-    variantClasses[status] ??
-    variantClasses.default;
+  const displayVariant =
+    variant || autoVariant;
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${classes}`}
+      className={`finance-status-badge finance-status-badge--${displayVariant}`}
     >
-      {icon}
+      <span className="finance-status-badge__dot" />
+
       {status}
     </span>
   );
