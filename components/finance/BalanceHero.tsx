@@ -1,77 +1,131 @@
-import { ReactNode } from "react";
+import React, { ReactNode } from "react";
 
-interface BalanceHeroProps {
+export type BalanceHeroVariant =
+  | "danger"
+  | "neutral"
+  | "primary"
+  | "success"
+  | "warning"
+  | "blue"
+  | "amber"
+  | "green";
+
+type BalanceHeroProps = {
   eyebrow?: string;
   title: string;
-  amount: string;
+  amount?: string;
+  value?: string;
   description?: string;
   icon?: ReactNode;
+
   trend?: {
     label: string;
     positive?: boolean;
   };
-  footer?: ReactNode;
-  variant?: "green" | "blue" | "amber" | "purple";
-}
+
+  variant?: BalanceHeroVariant;
+
+  primaryLabel?: string;
+  primaryValue?: string;
+
+  secondaryLabel?: string;
+  secondaryValue?: string;
+};
 
 export default function BalanceHero({
-  eyebrow = "CURRENT POSITION",
+  eyebrow,
   title,
   amount,
+  value,
   description,
   icon,
   trend,
-  footer,
-  variant = "green",
+  variant = "primary",
+  primaryLabel,
+  primaryValue,
+  secondaryLabel,
+  secondaryValue,
 }: BalanceHeroProps) {
+  const displayValue = amount ?? value ?? "";
+
   return (
-    <section className={`balance-hero balance-hero--${variant}`}>
-      <div className="balance-hero__background" />
-
-      <div className="balance-hero__content">
-        <div className="balance-hero__top">
-          <div>
-            <span className="balance-hero__eyebrow">
-              {eyebrow}
-            </span>
-
-            <h2>{title}</h2>
+    <section
+      className={`balanceHero balanceHero--${variant}`}
+    >
+      <div className="balanceHero__content">
+        {eyebrow && (
+          <div className="balanceHero__eyebrow">
+            {eyebrow}
           </div>
+        )}
 
-          {icon && (
-            <div className="balance-hero__icon">
-              {icon}
-            </div>
-          )}
-        </div>
-
-        <div className="balance-hero__amount">
-          {amount}
-        </div>
+        <h2 className="balanceHero__title">
+          {title}
+        </h2>
 
         {description && (
-          <p className="balance-hero__description">
+          <p className="balanceHero__description">
             {description}
           </p>
         )}
 
-        <div className="balance-hero__bottom">
-          {trend && (
-            <div
-              className={`balance-hero__trend ${
-                trend.positive
-                  ? "balance-hero__trend--positive"
-                  : "balance-hero__trend--negative"
-              }`}
-            >
-              <span className="balance-hero__trend-dot" />
-              {trend.label}
-            </div>
-          )}
-
-          {footer}
+        <div className="balanceHero__amount">
+          {displayValue}
         </div>
+
+        {trend && (
+          <div
+            className={`balanceHero__trend ${
+              trend.positive === false
+                ? "is-negative"
+                : "is-positive"
+            }`}
+          >
+            <span>
+              {trend.positive === false
+                ? "↓"
+                : "↑"}
+            </span>
+
+            {trend.label}
+          </div>
+        )}
+
+        {(primaryLabel ||
+          primaryValue ||
+          secondaryLabel ||
+          secondaryValue) && (
+          <div className="balanceHero__breakdown">
+            <div className="balanceHero__breakdownItem">
+              <span className="balanceHero__breakdownLabel">
+                {primaryLabel}
+              </span>
+
+              <strong className="balanceHero__breakdownValue">
+                {primaryValue}
+              </strong>
+            </div>
+
+            <div className="balanceHero__divider" />
+
+            <div className="balanceHero__breakdownItem">
+              <span className="balanceHero__breakdownLabel">
+                {secondaryLabel}
+              </span>
+
+              <strong className="balanceHero__breakdownValue">
+                {secondaryValue}
+              </strong>
+            </div>
+          </div>
+        )}
       </div>
+
+      {icon && (
+        <div className="balanceHero__icon">
+          {icon}
+        </div>
+      )}
     </section>
   );
 }

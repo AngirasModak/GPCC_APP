@@ -1,53 +1,70 @@
-import { ReactNode } from "react";
+import {
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  Landmark,
+  LucideIcon,
+} from "lucide-react";
 
-interface MetricCardProps {
+type Props = {
   title: string;
-  value: string | number;
+  value: string;
   subtitle?: string;
-  icon?: ReactNode;
-  tone?: string;
-  trend?: string | number;
-}
+  trend?: number;
+  icon?: "wallet" | "bank" | "up" | "down";
+  tone?: "green" | "blue" | "orange" | "red";
+};
+
+const icons: Record<string, LucideIcon> = {
+  wallet: Wallet,
+  bank: Landmark,
+  up: TrendingUp,
+  down: TrendingDown,
+};
 
 export default function MetricCard({
   title,
   value,
   subtitle,
-  icon,
-  tone = "default",
   trend,
-}: MetricCardProps) {
+  icon = "wallet",
+  tone = "green",
+}: Props) {
+  const Icon = icons[icon];
+
   return (
-    <div className={`metric-card metric-card--${tone}`}>
-      <div className="metric-card__top">
-        <div>
-          <p className="metric-card__title">{title}</p>
-
-          <h3 className="metric-card__value">{value}</h3>
-
-          {subtitle && (
-            <p className="metric-card__subtitle">{subtitle}</p>
-          )}
+    <div className={`metricCard ${tone}`}>
+      <div className="metricTop">
+        <div className="metricIcon">
+          <Icon size={21} />
         </div>
 
-        {icon && (
-          <div className="metric-card__icon">
-            {icon}
+        {trend !== undefined && (
+          <div
+            className={
+              trend >= 0
+                ? "trend positive"
+                : "trend negative"
+            }
+          >
+            {trend >= 0 ? (
+              <TrendingUp size={14} />
+            ) : (
+              <TrendingDown size={14} />
+            )}
+
+            {Math.abs(trend)}%
           </div>
         )}
       </div>
 
-      {trend !== undefined && trend !== null && (
-        <div
-          className={`metric-card__trend ${
-            Number(trend) >= 0
-              ? "metric-card__trend--positive"
-              : "metric-card__trend--negative"
-          }`}
-        >
-          {typeof trend === "number"
-            ? `${trend >= 0 ? "+" : ""}${trend}%`
-            : trend}
+      <div className="metricLabel">{title}</div>
+
+      <div className="metricValue">{value}</div>
+
+      {subtitle && (
+        <div className="metricSub">
+          {subtitle}
         </div>
       )}
     </div>

@@ -1,44 +1,49 @@
-"use client";
-
 import { ReactNode } from "react";
 
 interface FinancePageHeaderProps {
   eyebrow?: string;
   title: string;
-  description: string;
-  action?: ReactNode;
+  description?: string;
   badge?: ReactNode;
+  action?: ReactNode;
 }
 
 export default function FinancePageHeader({
-  eyebrow = "GREENWOOD PARK CULTURAL COMMITTEE",
+  eyebrow,
   title,
   description,
-  action,
   badge,
+  action,
 }: FinancePageHeaderProps) {
   return (
-    <section className="finance-page-header">
-      <div className="finance-page-header__content">
-        <div className="finance-eyebrow">
-          <span className="finance-eyebrow__dot" />
-          {eyebrow}
-        </div>
-
-        <h1>{title}</h1>
-
-        <p>{description}</p>
-      </div>
-
-      <div className="finance-page-header__actions">
-        {badge && (
-          <div className="finance-page-header__badge">
-            {badge}
-          </div>
+    <div className="mb-8 flex flex-col gap-5 border-b border-slate-200 pb-6 lg:flex-row lg:items-end lg:justify-between">
+      <div className="space-y-2">
+        {eyebrow && (
+          <p className="text-xs font-semibold tracking-[0.16em] text-slate-500 uppercase">
+            {eyebrow}
+          </p>
         )}
 
-        {action}
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+            {title}
+          </h1>
+
+          {badge}
+        </div>
+
+        {description && (
+          <p className="max-w-2xl text-sm leading-6 text-slate-600">
+            {description}
+          </p>
+        )}
       </div>
-    </section>
+
+      {action && (
+        <div className="flex items-center gap-3">
+          {action}
+        </div>
+      )}
+    </div>
   );
 }

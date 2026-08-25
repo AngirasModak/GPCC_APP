@@ -479,7 +479,7 @@ export default function BankTransfersPage() {
           value={money(summary.balance)}
           description="Available bank balance"
           icon={<WalletCards size={20} />}
-          accent="purple"
+          accent="blue"
         />
       </section>
 

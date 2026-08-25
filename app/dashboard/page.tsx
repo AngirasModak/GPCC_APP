@@ -1,374 +1,289 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "../../lib/supabase";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  Banknote,
+  Landmark,
+  RefreshCw,
+  TrendingUp,
+  WalletCards,
+} from "lucide-react";
 
-import MetricCard from "../../components/analytics/MetricCard";
-import FinancialHealth from "../../components/analytics/FinancialHealth";
-import SmartAlerts from "../../components/analytics/SmartAlerts";
-import CashFlowChart from "../../components/analytics/CashFlowChart";
-import FundAllocation from "../../components/analytics/FundAllocation";
-import ForecastPanel from "../../components/analytics/ForecastPanel";
-import ActionCentre from "../../components/analytics/ActionCentre";
-import SectionHeader from "../../components/analytics/SectionHeader";
+import ActivityTimeline from "@/components/finance/ActivityTimeline";
+import BalanceHero from "@/components/finance/BalanceHero";
+import DataToolbar from "@/components/finance/DataToolbar";
+import EmptyState from "@/components/finance/EmptyState";
+import FinanceMetricCard from "@/components/finance/FinanceMetricCard";
+import FinancePageHeader from "@/components/finance/FinancePageHeader";
+import FinancialSummary from "@/components/finance/FinancialSummary";
+import FundMovement from "@/components/finance/FundMovement";
+import InsightCard from "@/components/finance/InsightCard";
+import StatusBadge from "@/components/finance/StatusBadge";
+import TransactionTable from "@/components/finance/TransactionTable";
 
-const money = (value: number) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
 
-type Summary = {
-  income: number;
-  expense: number;
-  bank: number;
-  pettyCash: number;
-  totalFunds: number;
-};
+import {
+  formatCurrency,
+  formatCompactCurrency,
+  formatNumber,
+  formatDate,
+} from "@/lib/finance-utils";
 
-export default function Dashboard() {
-  const [loading, setLoading] = useState(true);
 
-  const [summary, setSummary] =
-    useState<Summary>({
-      income: 0,
-      expense: 0,
-      bank: 0,
-      pettyCash: 0,
-      totalFunds: 0,
-    });
 
-  const [monthlyData, setMonthlyData] =
-    useState<
-      {
-        month: string;
-        income: number;
-        expense: number;
-      }[]
-    >([]);
+export default function DashboardPage() {
+  /*
+   Replace these values with your actual API/database data.
+  */
 
-  const loadDashboard = async () => {
-    setLoading(true);
+  const summary = {
+    totalFunds: 0,
+    bank: 0,
+    pettyCash: 0,
+    netFlow: 0,
 
-    try {
-      /*
-       * KEEP YOUR EXISTING BANK,
-       * PETTY CASH, INCOME, EXPENSE
-       * AND TRANSFER CALCULATION LOGIC HERE.
-       */
-
-      const { data: incomeData } =
-        await supabase
-          .from("income")
-          .select("*")
-          .is("deleted_at", null)
-          .eq("status", "Cleared");
-
-      const { data: expenseData } =
-        await supabase
-          .from("expenses")
-          .select("*")
-          .is("deleted_at", null)
-          .eq("status", "Paid");
-
-      const incomes = incomeData || [];
-      const expenses = expenseData || [];
-
-      const income = incomes.reduce(
-        (sum: number, row: any) =>
-          sum + Number(row.amount || 0),
-        0
-      );
-
-      const expense = expenses.reduce(
-        (sum: number, row: any) =>
-          sum +
-          Number(row.gross_amount || 0),
-        0
-      );
-
-      /*
-       * Replace these with your existing
-       * reconciliation calculation.
-       */
-
-      const bank = 28178;
-      const pettyCash = 10000;
-
-      const totalFunds =
-        bank + pettyCash;
-
-      setSummary({
-        income,
-        expense,
-        bank,
-        pettyCash,
-        totalFunds,
-      });
-
-      /*
-       * MONTHLY CASH FLOW
-       */
-
-      const monthMap: Record<
-        string,
-        {
-          income: number;
-          expense: number;
-        }
-      > = {};
-
-      incomes.forEach((row: any) => {
-        const date =
-          row.income_date ||
-          row.date ||
-          row.created_at;
-
-        if (!date) return;
-
-        const month = new Date(date)
-          .toLocaleDateString("en-IN", {
-            month: "short",
-            year: "2-digit",
-          });
-
-        if (!monthMap[month]) {
-          monthMap[month] = {
-            income: 0,
-            expense: 0,
-          };
-        }
-
-        monthMap[month].income +=
-          Number(row.amount || 0);
-      });
-
-      expenses.forEach((row: any) => {
-        const date =
-          row.expense_date ||
-          row.date ||
-          row.created_at;
-
-        if (!date) return;
-
-        const month = new Date(date)
-          .toLocaleDateString("en-IN", {
-            month: "short",
-            year: "2-digit",
-          });
-
-        if (!monthMap[month]) {
-          monthMap[month] = {
-            income: 0,
-            expense: 0,
-          };
-        }
-
-        monthMap[month].expense +=
-          Number(row.gross_amount || 0);
-      });
-
-      setMonthlyData(
-        Object.entries(monthMap).map(
-          ([month, values]) => ({
-            month,
-            ...values,
-          })
-        )
-      );
-    } finally {
-      setLoading(false);
-    }
+    income: 0,
+    expense: 0,
+    pending: 0,
+    tds: 0,
   };
 
-  useEffect(() => {
-    loadDashboard();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="dashboardLoading">
-        Loading Financial Intelligence...
-      </div>
-    );
-  }
-
-  const netFlow =
-    summary.income - summary.expense;
-
-  const liquidity =
-    summary.totalFunds > 0
-      ? 90
-      : 40;
-
-  const cashFlow =
-    netFlow >= 0 ? 88 : 55;
-
-  const expenseControl =
-    summary.expense <= summary.income
-      ? 85
-      : 60;
-
   return (
-    <div className="analyticsPage">
+    <main className="finance-page">
+      <div className="finance-container">
 
-      {/* HERO */}
+        <FinancePageHeader
+          eyebrow="GPCC Financial Operations"
+          title="Financial Overview"
+          description="Monitor the complete financial position, fund movement, income, expenditure and cash availability of Greenwood Park Cultural Committee."
+          action={
+            <button className="finance-button">
+              <RefreshCw size={16} />
+              Refresh
+            </button>
+          }
+        />
 
-      <div className="commandHero">
-        <div>
-          <div className="eyebrow">
-            GPCC FINANCIAL INTELLIGENCE
-          </div>
+        {/* PRIMARY FINANCIAL POSITION */}
 
-          <h1>
-            Financial Command Centre
-          </h1>
+        <div className="finance-metrics-grid">
 
-          <p>
-            Live financial position, liquidity
-            intelligence, predictive outlook and
-            decision support.
-          </p>
+          <FinanceMetricCard
+            label="Total Available Funds"
+            value={formatCurrency(summary.totalFunds)}
+            description="Across all accounts"
+            icon={<WalletCards size={20} />}
+            accent="success"
+          />
+
+          <FinanceMetricCard
+            label="Current Bank Position"
+            value={formatCurrency(summary.bank)}
+            description="Available bank balance"
+            icon={<Landmark size={20} />}
+            accent="info"
+          />
+
+          <FinanceMetricCard
+            label="Current Petty Cash"
+            value={formatCurrency(summary.pettyCash)}
+            description="Physical cash available"
+            icon={<Banknote size={20} />}
+            accent="blue"
+          />
+
+          <FinanceMetricCard
+            label="Net Cash Flow"
+            value={formatCurrency(summary.netFlow)}
+            description="Income less expenditure"
+            icon={<TrendingUp size={20} />}
+            accent={
+              summary.netFlow >= 0
+                ? "success"
+                : "danger"
+            }
+            trend={
+              summary.netFlow >= 0
+                ? "Positive position"
+                : "Negative position"
+            }
+            trendDirection={
+              summary.netFlow >= 0
+                ? "up"
+                : "down"
+            }
+          />
+
         </div>
 
-        <div className="heroActions">
-          <div className="liveIndicator">
-            <span />
-            Live Financial Data
-          </div>
 
-          <button
-            className="refreshButton"
-            onClick={loadDashboard}
-          >
-            ↻ Refresh Intelligence
-          </button>
+        {/* FINANCIAL POSITION */}
+
+        <div className="finance-content-grid">
+
+          <BalanceHero
+            title="Current Financial Position"
+            amount={formatCurrency(summary.totalFunds)}
+            description="Total available funds across the committee's bank accounts and petty cash holdings."
+            primaryLabel="Bank Balance"
+            primaryValue={formatCurrency(summary.bank)}
+            secondaryLabel="Petty Cash"
+            secondaryValue={formatCurrency(summary.pettyCash)}
+          />
+
+
+          <section className="finance-card">
+
+            <div className="finance-card__header">
+              <div>
+                <h2 className="finance-card__title">
+                  Financial Movement
+                </h2>
+
+                <p className="finance-card__description">
+                  Income and expenditure position
+                </p>
+              </div>
+            </div>
+
+
+            <div className="finance-summary-list">
+
+              <div className="finance-summary-row">
+
+                <div className="finance-summary-row__left">
+
+                  <div className="finance-summary-row__icon">
+                    <ArrowUpRight
+                      size={19}
+                      color="#198754"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="finance-summary-row__label">
+                      Total Income
+                    </div>
+
+                    <div className="finance-summary-row__description">
+                      Funds received
+                    </div>
+                  </div>
+
+                </div>
+
+                <div className="finance-summary-row__amount">
+                  {formatCurrency(summary.income)}
+                </div>
+
+              </div>
+
+
+              <div className="finance-summary-row">
+
+                <div className="finance-summary-row__left">
+
+                  <div className="finance-summary-row__icon">
+                    <ArrowDownRight
+                      size={19}
+                      color="#d64545"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="finance-summary-row__label">
+                      Total Expenditure
+                    </div>
+
+                    <div className="finance-summary-row__description">
+                      Approved financial outflow
+                    </div>
+                  </div>
+
+                </div>
+
+                <div className="finance-summary-row__amount">
+                  {formatCurrency(summary.expense)}
+                </div>
+
+              </div>
+
+
+              <div className="finance-summary-row">
+
+                <div className="finance-summary-row__left">
+
+                  <div className="finance-summary-row__icon">
+                    <TrendingUp
+                      size={19}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="finance-summary-row__label">
+                      Pending Payments
+                    </div>
+
+                    <div className="finance-summary-row__description">
+                      Awaiting settlement
+                    </div>
+                  </div>
+
+                </div>
+
+                <div className="finance-summary-row__amount">
+                  {formatCurrency(summary.pending)}
+                </div>
+
+              </div>
+
+            </div>
+
+          </section>
+
         </div>
+
+
+        {/* SECONDARY METRICS */}
+
+        <div className="finance-metrics-grid">
+
+          <FinanceMetricCard
+            label="Total Income"
+            value={formatCurrency(summary.income)}
+            description="Income recorded"
+            icon={<ArrowUpRight size={20} />}
+            accent="success"
+          />
+
+          <FinanceMetricCard
+         label="Total Expenditure"
+            value={formatCurrency(summary.expense)}
+            description="Payments recorded"
+            icon={<ArrowDownRight size={20} />}
+            accent="danger"
+          />
+
+          <FinanceMetricCard
+            label="Pending Payments"
+            value={formatCurrency(summary.pending)}
+            description="Awaiting payment"
+            icon={<TrendingUp size={20} />}
+            accent="warning"
+          />
+
+          <FinanceMetricCard
+            label="TDS Position"
+            value={formatCurrency(summary.tds)}
+            description="Tax deducted at source"
+            icon={<Banknote size={20} />}
+            accent="info"
+          />
+
+        </div>
+
       </div>
-
-      {/* PRIMARY METRICS */}
-
-      <div className="metricGrid">
-        <MetricCard
-          title="Total Available Funds"
-          value={money(summary.totalFunds)}
-          subtitle="Current operational liquidity"
-          icon="wallet"
-          tone="green"
-        />
-
-        <MetricCard
-          title="Current Bank Position"
-          value={money(summary.bank)}
-          subtitle="Primary operating account"
-          icon="bank"
-          tone="blue"
-        />
-
-        <MetricCard
-          title="Current Petty Cash"
-          value={money(summary.pettyCash)}
-          subtitle="Available for operations"
-          icon="wallet"
-          tone="orange"
-        />
-
-        <MetricCard
-          title="Current Net Flow"
-          value={money(netFlow)}
-          subtitle="Income minus expenditure"
-          trend={netFlow >= 0 ? 12 : -12}
-          icon={netFlow >= 0 ? "up" : "down"}
-          tone={
-            netFlow >= 0
-              ? "green"
-              : "red"
-          }
-        />
-      </div>
-
-      {/* HEALTH + ALERTS */}
-
-      <div className="dashboardTwoColumn">
-        <FinancialHealth
-          liquidity={liquidity}
-          cashFlow={cashFlow}
-          expenseControl={expenseControl}
-        />
-
-        <SmartAlerts
-          alerts={[
-            ...(summary.totalFunds > 0
-              ? [
-                  {
-                    type: "success" as const,
-                    title:
-                      "Financial Position Stable",
-                    message:
-                      "Available funds are currently sufficient for operations.",
-                  },
-                ]
-              : [
-                  {
-                    type: "warning" as const,
-                    title:
-                      "Liquidity Attention Required",
-                    message:
-                      "Review current funding position.",
-                  },
-                ]),
-            {
-              type: "info",
-              title:
-                "Live Reconciliation",
-              message:
-                "Dashboard is calculated from cleared income, paid expenses and valid transfers.",
-            },
-          ]}
-        />
-      </div>
-
-      {/* CASH FLOW + FUND ALLOCATION */}
-
-      <div className="dashboardMainGrid">
-        <CashFlowChart
-          data={monthlyData}
-        />
-
-        <FundAllocation
-          bank={summary.bank}
-          pettyCash={summary.pettyCash}
-        />
-      </div>
-
-      {/* FORECAST + ACTIONS */}
-
-      <div className="dashboardTwoColumn">
-        <ForecastPanel
-          projectedIncome={
-            summary.income * 0.25
-          }
-          projectedExpense={
-            summary.expense * 0.25
-          }
-          projectedFunds={
-            summary.totalFunds +
-            summary.income * 0.25 -
-            summary.expense * 0.25
-          }
-        />
-
-        <ActionCentre
-          bank={summary.bank}
-          pettyCash={summary.pettyCash}
-          monthlyExpense={
-            summary.expense
-          }
-        />
-      </div>
-
-    </div>
+    </main>
   );
 }
