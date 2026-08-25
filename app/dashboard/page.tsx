@@ -12,12 +12,13 @@ import ForecastPanel from "../../components/analytics/ForecastPanel";
 import ActionCentre from "../../components/analytics/ActionCentre";
 import SectionHeader from "../../components/analytics/SectionHeader";
 
-const money = (n: number) =>
+const money = (value: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
+    minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(Number(n || 0));
+  }).format(value);
 
 type Summary = {
   income: number;

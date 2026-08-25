@@ -1,20 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowDownLeft,
+  ArrowRightLeft,
+  ArrowUpRight,
+  Landmark,
+  RefreshCw,
+  WalletCards,
+} from "lucide-react";
+
 import { supabase } from "../../lib/supabase";
 
-type Row = {
-  id: string;
-  date: string;
-  requisition_no: string | null;
-  type: string;
-  particulars: string;
-  amount: number;
-  reference: string | null;
-  remarks: string | null;
-  direction: "IN" | "OUT";
-  deleted_at?: string | null;
-};
+import FinancePageHeader from "../../components/finance/FinancePageHeader";
+import FinanceMetricCard from "../../components/finance/FinanceMetricCard";
+import BalanceHero from "../../components/finance/BalanceHero";
+import FinancialSummary from "../../components/finance/FinancialSummary";
+import FundMovement from "../../components/finance/FundMovement";
+import ActivityTimeline from "../../components/finance/ActivityTimeline";
+import InsightCard from "../../components/finance/InsightCard";
+import DataToolbar from "../../components/finance/DataToolbar";
+import TransactionTable from "../../components/finance/TransactionTable";
+import StatusBadge from "../../components/finance/StatusBadge";
+import EmptyState from "../../components/finance/EmptyState";
 
 type BankAccount = {
   id: string;
@@ -24,878 +32,639 @@ type BankAccount = {
   is_active: boolean;
 };
 
-const money = (n: number) =>
+const money = (value: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(Number(n || 0));
+  }).format(Number(value || 0));
 
-const blank = {
-  date: new Date().toISOString().slice(0, 10),
-  requisition_no: "",
-  type: "Bank Withdrawal",
-  particulars: "",
-  amount: "",
-  reference: "",
-  remarks: "",
+const normalize = (value: unknown) =>
+  String(value || "").trim().toLowerCase();
+
+const getNetPayment = (row: any) => {
+  if (
+    row.net_amount !== null &&
+    row.net_amount !== undefined
+  ) {
+    return Number(row.net_amount || 0);
+  }
+
+  const gross = Number(row.gross_amount || 0);
+
+  const tds =
+    row.tds_amount !== null &&
+    row.tds_amount !== undefined
+      ? Number(row.tds_amount || 0)
+      : gross *
+        (Number(row.tds_rate || 0) / 100);
+
+  return gross - tds;
 };
 
 export default function BankTransfersPage() {
-  const [rows, setRows] = useState<Row[]>([]);
-  const [bankAccount, setBankAccount] =
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const [account, setAccount] =
     useState<BankAccount | null>(null);
 
-  const [bankIncome, setBankIncome] = useState(0);
-  const [bankExpenses, setBankExpenses] =
-    useState(0);
+  const [income, setIncome] =
+    useState<any[]>([]);
 
-  const [form, setForm] = useState<any>(blank);
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] =
-    useState<string | null>(null);
+  const [expenses, setExpenses] =
+    useState<any[]>([]);
 
-  const [msg, setMsg] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [transfers, setTransfers] =
+    useState<any[]>([]);
 
-  const load = async () => {
+  const loadData = async () => {
     setLoading(true);
     setMsg("");
 
     try {
-      /*
-       * ========================================
-       * 1. LOAD ACTIVE BANK ACCOUNT
-       * ========================================
-       */
+      const [
+        bankResponse,
+        incomeResponse,
+        expenseResponse,
+        transferResponse,
+      ] = await Promise.all([
+        supabase
+          .from("bank_accounts")
+          .select("*")
+          .eq("is_active", true)
+          .maybeSingle(),
 
-      const {
-        data: bankData,
-        error: bankError,
-      } = await supabase
-        .from("bank_accounts")
-        .select("*")
-        .eq("is_active", true)
-        .maybeSingle();
+        supabase
+          .from("income")
+          .select("*")
+          .is("deleted_at", null)
+          .eq("status", "Cleared"),
 
-      if (bankError) {
-        throw new Error(bankError.message);
-      }
+        supabase
+          .from("expenses")
+          .select("*")
+          .is("deleted_at", null)
+          .eq("status", "Paid"),
 
-      setBankAccount(bankData);
+        supabase
+          .from("fund_transfers")
+          .select("*")
+          .is("deleted_at", null),
+      ]);
 
-      /*
-       * ========================================
-       * 2. LOAD FUND TRANSFERS
-       * ========================================
-       */
-
-      const {
-        data: transferData,
-        error: transferError,
-      } = await supabase
-        .from("fund_transfers")
-        .select("*")
-        .is("deleted_at", null)
-        .order("date", {
-          ascending: false,
-        });
-
-      if (transferError) {
+      if (bankResponse.error) {
         throw new Error(
-          transferError.message
+          bankResponse.error.message
         );
       }
 
-      setRows(
-        (transferData || []) as Row[]
-      );
-
-      /*
-       * ========================================
-       * 3. LOAD CLEARED INCOME
-       *
-       * Only non-cash income increases Bank.
-       * ========================================
-       */
-
-      const {
-        data: incomeData,
-        error: incomeError,
-      } = await supabase
-        .from("income")
-        .select("*")
-        .is("deleted_at", null)
-        .eq("status", "Cleared");
-
-      if (incomeError) {
+      if (incomeResponse.error) {
         throw new Error(
-          incomeError.message
+          incomeResponse.error.message
         );
       }
 
-      const totalBankIncome =
-        (incomeData || [])
-          .filter((row: any) => {
-            const mode = String(
-              row.mode || ""
-            ).toLowerCase();
-
-            return (
-              mode === "cheque" ||
-              mode === "online" ||
-              mode === "bank transfer" ||
-              mode === "upi"
-            );
-          })
-          .reduce(
-            (total: number, row: any) =>
-              total +
-              Number(row.amount || 0),
-            0
-          );
-
-      setBankIncome(totalBankIncome);
-
-      /*
-       * ========================================
-       * 4. LOAD PAID EXPENSES
-       *
-       * Only Bank / Cheque / Online / UPI
-       * payments reduce Bank.
-       *
-       * Net amount is used because TDS does
-       * not leave the bank as vendor payment.
-       * ========================================
-       */
-
-      const {
-        data: expenseData,
-        error: expenseError,
-      } = await supabase
-        .from("expenses")
-        .select("*")
-        .is("deleted_at", null)
-        .eq("status", "Paid");
-
-      if (expenseError) {
+      if (expenseResponse.error) {
         throw new Error(
-          expenseError.message
+          expenseResponse.error.message
         );
       }
 
-      const totalBankExpenses =
-        (expenseData || [])
-          .filter((row: any) => {
-            const mode = String(
-              row.payment_mode || ""
-            ).toLowerCase();
+      if (transferResponse.error) {
+        throw new Error(
+          transferResponse.error.message
+        );
+      }
 
-            return (
-              mode === "bank transfer" ||
-              mode === "cheque" ||
-              mode === "online" ||
-              mode === "upi"
-            );
-          })
-          .reduce(
-            (total: number, row: any) => {
-              const netAmount =
-                row.net_amount !== null &&
-                row.net_amount !== undefined
-                  ? Number(row.net_amount)
-                  : Number(
-                      row.gross_amount || 0
-                    ) -
-                    Number(
-                      row.tds_amount || 0
-                    );
-
-              return total + netAmount;
-            },
-            0
-          );
-
-      setBankExpenses(
-        totalBankExpenses
+      setAccount(bankResponse.data);
+      setIncome(incomeResponse.data || []);
+      setExpenses(expenseResponse.data || []);
+      setTransfers(
+        transferResponse.data || []
       );
     } catch (error: any) {
       setMsg(
         error?.message ||
           "Unable to load bank data."
       );
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   useEffect(() => {
-    load();
+    loadData();
   }, []);
 
-  /*
-   * ========================================
-   * BANK TRANSFER CALCULATIONS
-   * ========================================
-   */
-
-  /*
-   * BANK → PETTY CASH
-   */
-
-  const bankToPettyCash = rows
-    .filter(
-      (row) =>
-        row.type ===
-          "Bank Withdrawal" ||
-        row.type === "Withdrawal"
-    )
-    .reduce(
-      (total, row) =>
-        total +
-        Number(row.amount || 0),
-      0
+  const summary = useMemo(() => {
+    const opening = Number(
+      account?.opening_balance || 0
     );
 
-  /*
-   * PETTY CASH → BANK
-   */
-
-  const pettyCashToBank = rows
-    .filter(
-      (row) =>
-        row.type ===
-          "Petty Cash to Bank" ||
-        row.type === "Cash Deposit" ||
-        row.type ===
-          "Petty Cash Deposit" ||
-        row.type ===
-          "Return to Bank"
-    )
-    .reduce(
-      (total, row) =>
-        total +
-        Number(row.amount || 0),
-      0
-    );
-
-  /*
-   * BANK ADJUSTMENT CREDIT
-   */
-
-  const bankAdjustmentCredit =
-    rows
+    const bankIncome = income
       .filter(
         (row) =>
-          row.type ===
-            "Bank Adjustment" &&
-          row.direction === "IN"
+          normalize(row.mode) !== "cash"
       )
       .reduce(
-        (total, row) =>
-          total +
-          Number(row.amount || 0),
+        (sum, row) =>
+          sum + Number(row.amount || 0),
         0
       );
 
-  /*
-   * BANK ADJUSTMENT DEBIT
-   */
-
-  const bankAdjustmentDebit =
-    rows
+    const bankExpense = expenses
       .filter(
         (row) =>
-          row.type ===
-            "Bank Adjustment" &&
-          row.direction === "OUT"
+          normalize(row.payment_mode) !==
+          "petty cash"
       )
       .reduce(
-        (total, row) =>
-          total +
-          Number(row.amount || 0),
+        (sum, row) =>
+          sum + getNetPayment(row),
         0
       );
 
-  /*
-   * ========================================
-   * FINAL BANK BALANCE
-   * ========================================
-   */
-
-  const openingBalance =
-    Number(
-      bankAccount?.opening_balance || 0
-    );
-
-  const currentBank =
-    openingBalance +
-    bankIncome -
-    bankExpenses -
-    bankToPettyCash +
-    pettyCashToBank +
-    bankAdjustmentCredit -
-    bankAdjustmentDebit;
-
-  /*
-   * ========================================
-   * SAVE TRANSACTION
-   * ========================================
-   */
-
-  const save = async () => {
-    if (
-      !form.particulars.trim() ||
-      !form.amount
-    ) {
-      setMsg(
-        "Particulars and amount are required."
+    const bankToCash = transfers
+      .filter((row) =>
+        [
+          "bank withdrawal",
+          "withdrawal",
+        ].includes(normalize(row.type))
+      )
+      .reduce(
+        (sum, row) =>
+          sum + Number(row.amount || 0),
+        0
       );
-      return;
-    }
 
-    if (Number(form.amount) <= 0) {
-      setMsg(
-        "Amount must be greater than zero."
+    const cashToBank = transfers
+      .filter((row) =>
+        [
+          "petty cash to bank",
+          "cash deposit",
+          "deposit",
+          "petty cash deposit",
+          "return to bank",
+        ].includes(normalize(row.type))
+      )
+      .reduce(
+        (sum, row) =>
+          sum + Number(row.amount || 0),
+        0
       );
-      return;
-    }
 
-    let direction: "IN" | "OUT" =
-      "OUT";
+    const adjustmentCredit =
+      transfers
+        .filter(
+          (row) =>
+            normalize(row.type) ===
+              "bank adjustment" &&
+            normalize(row.direction) ===
+              "in"
+        )
+        .reduce(
+          (sum, row) =>
+            sum + Number(row.amount || 0),
+          0
+        );
 
-    if (
-      form.type ===
-        "Petty Cash to Bank" ||
-      form.type ===
-        "Bank Adjustment Credit"
-    ) {
-      direction = "IN";
-    }
+    const adjustmentDebit =
+      transfers
+        .filter(
+          (row) =>
+            normalize(row.type) ===
+              "bank adjustment" &&
+            normalize(row.direction) ===
+              "out"
+        )
+        .reduce(
+          (sum, row) =>
+            sum + Number(row.amount || 0),
+          0
+        );
 
-    const normalizedType =
-      form.type ===
-        "Bank Adjustment Credit" ||
-      form.type ===
-        "Bank Adjustment Debit"
-        ? "Bank Adjustment"
-        : form.type;
+    const balance =
+      opening +
+      bankIncome -
+      bankExpense -
+      bankToCash +
+      cashToBank +
+      adjustmentCredit -
+      adjustmentDebit;
 
-    const payload = {
-      date: form.date,
-
-      requisition_no:
-        form.requisition_no.trim() ||
-        null,
-
-      type: normalizedType,
-
-      particulars:
-        form.particulars.trim(),
-
-      amount: Number(form.amount),
-
-      reference:
-        form.reference.trim() ||
-        null,
-
-      remarks:
-        form.remarks.trim() ||
-        null,
-
-      direction,
+    return {
+      opening,
+      bankIncome,
+      bankExpense,
+      bankToCash,
+      cashToBank,
+      adjustmentCredit,
+      adjustmentDebit,
+      balance,
     };
+  }, [
+    account,
+    income,
+    expenses,
+    transfers,
+  ]);
 
-    let error: any;
+  const bankTransactions =
+    useMemo(() => {
+      const incomeRows = income
+        .filter(
+          (row) =>
+            normalize(row.mode) !== "cash"
+        )
+        .map((row) => ({
+          id: `income-${row.id}`,
+          date:
+            row.date ||
+            row.income_date ||
+            "",
+          type: "Bank Income",
+          particulars:
+            row.particulars ||
+            row.description ||
+            row.source ||
+            "-",
+          reference:
+            row.reference_no ||
+            "-",
+          debit: 0,
+          credit: Number(
+            row.amount || 0
+          ),
+          status:
+            row.status || "Cleared",
+        }));
 
-    if (editing) {
-      ({ error } = await supabase
-        .from("fund_transfers")
-        .update(payload)
-        .eq("id", editing));
-    } else {
-      ({ error } = await supabase
-        .from("fund_transfers")
-        .insert(payload));
-    }
+      const expenseRows = expenses
+        .filter(
+          (row) =>
+            normalize(row.payment_mode) !==
+            "petty cash"
+        )
+        .map((row) => ({
+          id: `expense-${row.id}`,
+          date:
+            row.date ||
+            row.expense_date ||
+            "",
+          type: "Bank Expense",
+          particulars:
+            row.particulars ||
+            row.description ||
+            row.vendor_name ||
+            "-",
+          reference:
+            row.reference_no ||
+            "-",
+          debit: getNetPayment(row),
+          credit: 0,
+          status:
+            row.status || "Paid",
+        }));
 
-    if (error) {
-      setMsg(error.message);
-      return;
-    }
+      const transferRows =
+        transfers.map((row) => {
+          const type =
+            normalize(row.type);
 
-    setOpen(false);
-    setEditing(null);
-    setForm(blank);
-    setMsg("");
+          const debit =
+            [
+              "bank withdrawal",
+              "withdrawal",
+            ].includes(type) ||
+            (
+              type ===
+                "bank adjustment" &&
+              normalize(
+                row.direction
+              ) === "out"
+            );
 
-    await load();
-  };
+          return {
+            id: `transfer-${row.id}`,
+            date:
+              row.date ||
+              row.transfer_date ||
+              "",
+            type:
+              row.type || "Transfer",
+            particulars:
+              row.particulars ||
+              row.description ||
+              "-",
+            reference:
+              row.reference_no ||
+              "-",
+            debit: debit
+              ? Number(row.amount || 0)
+              : 0,
+            credit: debit
+              ? 0
+              : Number(row.amount || 0),
+            status:
+              row.status ||
+              "Completed",
+          };
+        });
 
-  /*
-   * ========================================
-   * EDIT TRANSACTION
-   * ========================================
-   */
+      return [
+        ...incomeRows,
+        ...expenseRows,
+        ...transferRows,
+      ].sort(
+        (a, b) =>
+          new Date(b.date).getTime() -
+          new Date(a.date).getTime()
+      );
+    }, [
+      income,
+      expenses,
+      transfers,
+    ]);
 
-  const edit = (row: Row) => {
-    setEditing(row.id);
-
-    let displayType = row.type;
-
-    if (
-      row.type ===
-      "Bank Adjustment"
-    ) {
-      displayType =
-        row.direction === "IN"
-          ? "Bank Adjustment Credit"
-          : "Bank Adjustment Debit";
-    }
-
-    setForm({
-      ...row,
-
-      type: displayType,
-
-      amount: String(row.amount),
-
-      requisition_no:
-        row.requisition_no || "",
-
-      reference:
-        row.reference || "",
-
-      remarks:
-        row.remarks || "",
-    });
-
-    setOpen(true);
-  };
-
-  /*
-   * ========================================
-   * DELETE TRANSACTION
-   * ========================================
-   */
-
-  const del = async (id: string) => {
-    if (
-      !confirm(
-        "Delete this bank transaction?"
-      )
-    ) {
-      return;
-    }
-
-    const { error } = await supabase
-      .from("fund_transfers")
-      .update({
-        deleted_at:
-          new Date().toISOString(),
-      })
-      .eq("id", id);
-
-    if (error) {
-      setMsg(error.message);
-      return;
-    }
-
-    await load();
-  };
-
-  const openNewEntry = () => {
-    setEditing(null);
-    setForm(blank);
-    setMsg("");
-    setOpen(true);
-  };
-
-  /*
-   * ========================================
-   * LOADING
-   * ========================================
-   */
+  const filteredTransactions =
+    bankTransactions.filter((row) =>
+      [
+        row.date,
+        row.type,
+        row.particulars,
+        row.reference,
+        row.status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(search.toLowerCase())
+    );
 
   if (loading) {
     return (
-      <div className="card">
-        <h2>
-          Loading Bank Transactions...
-        </h2>
+      <div className="finance-loading">
+        Loading bank position...
       </div>
     );
   }
 
-  /*
-   * ========================================
-   * PAGE
-   * ========================================
-   */
+  if (!account) {
+    return (
+      <EmptyState
+        title="Bank Account Not Configured"
+        description="Configure an active bank account before using bank transfers."
+        icon={<Landmark size={30} />}
+      />
+    );
+  }
 
   return (
-    <div>
-      <div className="pageHead">
-        <div>
-          <h1>
-            Bank & Transfers
-          </h1>
-
-          <p className="muted">
-            {bankAccount
-              ? `${bankAccount.account_name} · Opening balance as on ${bankAccount.opening_balance_date}`
-              : "Bank movements and transfers between GPCC Bank and Petty Cash"}
-          </p>
-        </div>
-
-        <button
-          className="btn"
-          onClick={openNewEntry}
-        >
-          + Add Bank Transaction
-        </button>
-      </div>
+    <main className="finance-page">
+      <FinancePageHeader
+        eyebrow="GPCC FINANCIAL OPERATIONS"
+        title="Bank & Transfers"
+        description="Monitor bank position, incoming collections, payments and internal fund transfers."
+        badge={
+          <StatusBadge
+            status="Live Bank Position"
+            variant="success"
+          />
+        }
+        action={
+          <button
+            className="finance-button finance-button--secondary"
+            onClick={loadData}
+          >
+            <RefreshCw size={17} />
+            Refresh
+          </button>
+        }
+      />
 
       {msg && (
-        <div
-          className="card"
-          style={{
-            marginBottom: 14,
-            color: "#b42318",
-          }}
-        >
+        <div className="finance-alert finance-alert--danger">
           {msg}
         </div>
       )}
 
-      <div
-        className="grid"
-        style={{
-          marginBottom: 20,
-        }}
-      >
-        <div className="card">
-          <div className="muted">
-            Opening Bank Balance
-          </div>
+      <section className="finance-metrics-grid">
+        <FinanceMetricCard
+          label="Opening Balance"
+          value={money(summary.opening)}
+          description="Configured bank opening balance"
+          icon={<Landmark size={20} />}
+          accent="blue"
+        />
 
-          <div className="metric">
-            {money(openingBalance)}
-          </div>
-        </div>
+        <FinanceMetricCard
+          label="Bank Income"
+          value={money(summary.bankIncome)}
+          description="Cleared non-cash income"
+          icon={<ArrowDownLeft size={20} />}
+          accent="green"
+        />
 
-        <div className="card">
-          <div className="muted">
-            Cleared Bank Income
-          </div>
+        <FinanceMetricCard
+          label="Bank Payments"
+          value={money(summary.bankExpense)}
+          description="Actual bank outflow"
+          icon={<ArrowUpRight size={20} />}
+          accent="amber"
+        />
 
-          <div className="metric">
-            {money(bankIncome)}
-          </div>
-        </div>
+        <FinanceMetricCard
+          label="Current Position"
+          value={money(summary.balance)}
+          description="Available bank balance"
+          icon={<WalletCards size={20} />}
+          accent="purple"
+        />
+      </section>
 
-        <div className="card">
-          <div className="muted">
-            Paid Bank Expenses
-          </div>
+      <section className="finance-content-grid finance-content-grid--hero">
+        <BalanceHero
+          eyebrow="CURRENT BANK POSITION"
+          title={account.account_name}
+          amount={money(summary.balance)}
+          description="Calculated from opening balance, cleared income, payments, transfers and adjustments."
+          icon={<Landmark size={30} />}
+          trend={{
+            label:
+              summary.balance >= 0
+                ? "Positive bank position"
+                : "Bank position requires review",
+            positive:
+              summary.balance >= 0,
+          }}
+          variant="blue"
+        />
 
-          <div className="metric">
-            {money(bankExpenses)}
-          </div>
-        </div>
+        <FinancialSummary
+          title="Bank Reconciliation"
+          subtitle="Movement from opening to current position"
+          items={[
+            {
+              label: "Opening Balance",
+              value: money(
+                summary.opening
+              ),
+            },
+            {
+              label: "Cleared Bank Income",
+              value: money(
+                summary.bankIncome
+              ),
+              tone: "positive",
+            },
+            {
+              label: "Bank Expenses",
+              value: money(
+                summary.bankExpense
+              ),
+              tone: "negative",
+            },
+            {
+              label: "Bank → Petty Cash",
+              value: money(
+                summary.bankToCash
+              ),
+              tone: "negative",
+            },
+            {
+              label: "Petty Cash → Bank",
+              value: money(
+                summary.cashToBank
+              ),
+              tone: "positive",
+            },
+            {
+              label: "Current Position",
+              value: money(
+                summary.balance
+              ),
+              tone: "positive",
+            },
+          ]}
+        />
+      </section>
 
-        <div className="card">
-          <div className="muted">
-            Bank → Petty Cash
-          </div>
+      <section className="finance-section-grid">
+        <FundMovement
+          from="Bank Account"
+          to="Petty Cash"
+          amount={money(summary.bankToCash)}
+          description="Total internal withdrawals from the bank."
+          status="completed"
+        />
 
-          <div className="metric">
-            {money(bankToPettyCash)}
-          </div>
-        </div>
+        <InsightCard
+          title="Transfer Intelligence"
+          description={
+            summary.bankToCash >
+            summary.cashToBank
+              ? "More funds have moved from Bank to Petty Cash than returned to the bank."
+              : "Cash deposits back to bank are balanced against withdrawals."
+          }
+          variant="info"
+        />
+      </section>
 
-        <div className="card">
-          <div className="muted">
-            Petty Cash → Bank
-          </div>
-
-          <div className="metric">
-            {money(pettyCashToBank)}
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="muted">
-            Current Bank Position
-          </div>
-
-          <div className="metric">
-            {money(currentBank)}
-          </div>
-        </div>
-      </div>
-
-      <div className="card tableWrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Requisition No.</th>
-              <th>Transaction</th>
-              <th>Particulars</th>
-              <th>Reference</th>
-              <th>Direction</th>
-              <th>Amount</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {rows.length ? (
-              rows.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.date}</td>
-
-                  <td>
-                    {row.requisition_no ||
-                      "-"}
-                  </td>
-
-                  <td>{row.type}</td>
-
-                  <td>
-                    {row.particulars}
-                  </td>
-
-                  <td>
-                    {row.reference || "-"}
-                  </td>
-
-                  <td>
-                    {row.direction}
-                  </td>
-
-                  <td>
-                    {money(
-                      Number(row.amount)
-                    )}
-                  </td>
-
-                  <td className="actions">
-                    <button
-                      className="btn secondary"
-                      onClick={() =>
-                        edit(row)
-                      }
-                    >
-                      Edit
-                    </button>
-
-                    <button
-                      className="btn danger"
-                      onClick={() =>
-                        del(row.id)
-                      }
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="empty"
-                >
-                  No bank transactions yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {open && (
-        <div className="modalBg">
-          <div className="modal">
-            <div className="pageHead">
-              <h2>
-                {editing
-                  ? "Edit Bank Transaction"
-                  : "Add Bank Transaction"}
-              </h2>
-
-              <button
-                className="btn secondary"
-                onClick={() =>
-                  setOpen(false)
-                }
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="formGrid">
-              <Field
-                label="Date"
-                type="date"
-                value={form.date}
-                set={(value) =>
-                  setForm({
-                    ...form,
-                    date: value,
-                  })
-                }
-              />
-
-              <Field
-                label="Requisition Number"
-                value={
-                  form.requisition_no
-                }
-                set={(value) =>
-                  setForm({
-                    ...form,
-                    requisition_no:
-                      value,
-                  })
-                }
-              />
-
-              <label>
-                Transaction Type
-
-                <select
-                  className="input"
-                  value={form.type}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      type:
-                        e.target.value,
-                    })
-                  }
-                >
-                  <option value="Bank Withdrawal">
-                    Bank → Petty Cash
-                  </option>
-
-                  <option value="Petty Cash to Bank">
-                    Petty Cash → Bank
-                  </option>
-
-                  <option value="Bank Adjustment Credit">
-                    Bank Adjustment Credit
-                  </option>
-
-                  <option value="Bank Adjustment Debit">
-                    Bank Adjustment Debit
-                  </option>
-                </select>
-              </label>
-
-              <Field
-                label="Amount"
-                type="number"
-                value={form.amount}
-                set={(value) =>
-                  setForm({
-                    ...form,
-                    amount: value,
-                  })
-                }
-              />
-
-              <Field
-                label="Particulars"
-                value={form.particulars}
-                set={(value) =>
-                  setForm({
-                    ...form,
-                    particulars: value,
-                  })
-                }
-              />
-
-              <Field
-                label="Reference / Voucher / Bill No."
-                value={form.reference}
-                set={(value) =>
-                  setForm({
-                    ...form,
-                    reference: value,
-                  })
-                }
-              />
-            </div>
-
-            <label
-              style={{
-                display: "block",
-                marginTop: 14,
-              }}
-            >
-              Remarks
-
-              <textarea
-                className="input"
-                rows={3}
-                value={form.remarks}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    remarks:
-                      e.target.value,
-                  })
-                }
-              />
-            </label>
-
-            <div
-              style={{
-                marginTop: 20,
-              }}
-            >
-              <button
-                className="btn"
-                onClick={save}
-              >
-                {editing
-                  ? "Update Transaction"
-                  : "Save Transaction"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Field({
-  label,
-  type = "text",
-  value,
-  set,
-}: {
-  label: string;
-  type?: string;
-  value: any;
-  set: (value: string) => void;
-}) {
-  return (
-    <label>
-      {label}
-
-      <input
-        className="input"
-        type={type}
-        value={value ?? ""}
-        onChange={(e) =>
-          set(e.target.value)
-        }
+      <ActivityTimeline
+        title="Recent Bank Activity"
+        subtitle="Latest inflows, payments and transfers"
+        items={bankTransactions
+          .slice(0, 5)
+          .map((row) => ({
+            id: row.id,
+            title: row.type,
+            description:
+              row.particulars,
+            amount: money(
+              row.credit ||
+                row.debit
+            ),
+            date: row.date || "-",
+            icon: (
+              <ArrowRightLeft size={16} />
+            ),
+            status: "completed",
+          }))}
       />
-    </label>
+
+      <section className="finance-panel">
+        <div className="finance-panel__header">
+          <div>
+            <span className="finance-section-eyebrow">
+              BANK LEDGER
+            </span>
+
+            <h3>Bank Transactions</h3>
+
+            <p>
+              Combined view of bank income,
+              expenditure and fund transfers.
+            </p>
+          </div>
+        </div>
+
+        <DataToolbar
+          searchValue={search}
+          onSearchChange={setSearch}
+        />
+
+        <TransactionTable
+          data={filteredTransactions}
+          emptyMessage="No bank transactions found."
+          columns={[
+            {
+              key: "date",
+              label: "Date",
+            },
+            {
+              key: "type",
+              label: "Transaction Type",
+            },
+            {
+              key: "particulars",
+              label: "Particulars",
+            },
+            {
+              key: "reference",
+              label: "Reference",
+            },
+            {
+              key: "debit",
+              label: "Debit",
+              align: "right",
+              render: (row) =>
+                row.debit
+                  ? money(row.debit)
+                  : "-",
+            },
+            {
+              key: "credit",
+              label: "Credit",
+              align: "right",
+              render: (row) =>
+                row.credit
+                  ? money(row.credit)
+                  : "-",
+            },
+            {
+              key: "status",
+              label: "Status",
+              render: (row) => (
+                <StatusBadge
+                  status={row.status}
+                  variant="success"
+                />
+              ),
+            },
+          ]}
+        />
+      </section>
+    </main>
   );
 }
