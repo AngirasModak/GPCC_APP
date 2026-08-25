@@ -3,122 +3,58 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-/* ============================================================
-   TYPES
-============================================================ */
-
-type IncomeRow = {
-  id: string;
-  amount?: number | null;
-  mode?: string | null;
-  status?: string | null;
-  category?: string | null;
-  income_category?: string | null;
-  source?: string | null;
-  income_date?: string | null;
-  date?: string | null;
-  transaction_date?: string | null;
-  created_at?: string | null;
-  deleted_at?: string | null;
-};
-
-type ExpenseRow = {
-  id: string;
-  gross_amount?: number | null;
-  net_amount?: number | null;
-  tds_amount?: number | null;
-  tds_rate?: number | null;
-  payment_mode?: string | null;
-  status?: string | null;
-  category?: string | null;
-  expense_category?: string | null;
-  description?: string | null;
-  vendor_name?: string | null;
-  expense_date?: string | null;
-  date?: string | null;
-  transaction_date?: string | null;
-  created_at?: string | null;
-  deleted_at?: string | null;
-};
-
-type TransferRow = {
-  id: string;
-  amount?: number | null;
-  type?: string | null;
-  direction?: string | null;
-  transfer_date?: string | null;
-  date?: string | null;
-  transaction_date?: string | null;
-  created_at?: string | null;
-  deleted_at?: string | null;
-};
-
 type BankAccount = {
   id: string;
-  account_name?: string | null;
-  opening_balance?: number | null;
-  opening_balance_date?: string | null;
-  is_active?: boolean | null;
+  account_name: string;
+  opening_balance: number;
+  opening_balance_date: string;
+  is_active: boolean;
 };
 
 type PettyCashAccount = {
   id: string;
-  account_name?: string | null;
-  opening_balance?: number | null;
-  opening_balance_date?: string | null;
-  is_active?: boolean | null;
+  account_name: string;
+  opening_balance: number;
+  opening_balance_date: string;
+  is_active: boolean;
 };
 
-type MonthlyData = {
-  month: string;
-  shortMonth: string;
-  income: number;
-  expense: number;
-  surplus: number;
+type IncomeRow = {
+  id: string;
+  amount: number;
+  mode?: string;
+  date?: string;
+  income_date?: string;
+  created_at?: string;
+  category?: string;
+  source?: string;
+  status?: string;
 };
 
-type CategoryData = {
-  name: string;
-  value: number;
+type ExpenseRow = {
+  id: string;
+  gross_amount?: number;
+  net_amount?: number;
+  tds_amount?: number;
+  tds_rate?: number;
+  payment_mode?: string;
+  date?: string;
+  expense_date?: string;
+  created_at?: string;
+  category?: string;
+  expense_category?: string;
+  status?: string;
 };
 
-/* ============================================================
-   CONSTANTS
-============================================================ */
-
-const MONTHS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
-
-const SHORT_MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-/* ============================================================
-   HELPERS
-============================================================ */
+type TransferRow = {
+  id: string;
+  amount: number;
+  type?: string;
+  direction?: string;
+  date?: string;
+  transfer_date?: string;
+  created_at?: string;
+};
 
 const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -127,105 +63,30 @@ const money = (n: number) =>
     maximumFractionDigits: 0,
   }).format(Number(n || 0));
 
-const compactMoney = (n: number) => {
-  const value = Number(n || 0);
+const number = (n: number) =>
+  new Intl.NumberFormat("en-IN", {
+    maximumFractionDigits: 0,
+  }).format(Number(n || 0));
 
-  if (Math.abs(value) >= 10000000) {
-    return `₹${(value / 10000000).toFixed(2)} Cr`;
-  }
+const getDate = (row: any) =>
+  row.date ||
+  row.income_date ||
+  row.expense_date ||
+  row.transfer_date ||
+  row.created_at ||
+  "";
 
-  if (Math.abs(value) >= 100000) {
-    return `₹${(value / 100000).toFixed(2)} L`;
-  }
-
-  if (Math.abs(value) >= 1000) {
-    return `₹${(value / 1000).toFixed(1)} K`;
-  }
-
-  return money(value);
-};
-
-const getNumber = (value: any) => Number(value || 0);
-
-const normalise = (value: any) =>
-  String(value || "")
-    .trim()
-    .toLowerCase();
-
-const getRowDate = (row: any) => {
-  return (
-    row.income_date ||
-    row.expense_date ||
-    row.transfer_date ||
-    row.transaction_date ||
-    row.date ||
-    row.created_at ||
-    null
-  );
-};
-
-const getFinancialYearFromDate = (dateValue: string | null) => {
-  if (!dateValue) return null;
+const getMonthKey = (dateValue: string) => {
+  if (!dateValue) return "Unknown";
 
   const date = new Date(dateValue);
 
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
+  if (Number.isNaN(date.getTime())) return "Unknown";
 
-  const year = date.getFullYear();
-  const month = date.getMonth();
-
-  if (month >= 3) {
-    return `${year}-${String(year + 1).slice(-2)}`;
-  }
-
-  return `${year - 1}-${String(year).slice(-2)}`;
-};
-
-const getCurrentFinancialYear = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-
-  if (now.getMonth() >= 3) {
-    return `${year}-${String(year + 1).slice(-2)}`;
-  }
-
-  return `${year - 1}-${String(year).slice(-2)}`;
-};
-
-const getFinancialYearRange = (financialYear: string) => {
-  const startYear = Number(financialYear.split("-")[0]);
-
-  const start = new Date(startYear, 3, 1);
-  const end = new Date(startYear + 1, 2, 31, 23, 59, 59);
-
-  return {
-    start,
-    end,
-  };
-};
-
-const isWithinFinancialYear = (
-  row: any,
-  financialYear: string
-) => {
-  const dateValue = getRowDate(row);
-
-  if (!dateValue) {
-    return false;
-  }
-
-  const date = new Date(dateValue);
-
-  if (Number.isNaN(date.getTime())) {
-    return false;
-  }
-
-  const { start, end } =
-    getFinancialYearRange(financialYear);
-
-  return date >= start && date <= end;
+  return date.toLocaleDateString("en-IN", {
+    month: "short",
+    year: "2-digit",
+  });
 };
 
 const getNetPayment = (row: ExpenseRow) => {
@@ -248,30 +109,18 @@ const getNetPayment = (row: ExpenseRow) => {
   return gross - tds;
 };
 
-/* ============================================================
-   MAIN COMPONENT
-============================================================ */
-
-export default function ReportsPage() {
+export default function ReportsAnalyticsPage() {
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [message, setMessage] = useState("");
 
-  const [msg, setMsg] = useState("");
+  const [incomeData, setIncomeData] =
+    useState<IncomeRow[]>([]);
 
-  const [financialYear, setFinancialYear] =
-    useState(getCurrentFinancialYear());
+  const [expenseData, setExpenseData] =
+    useState<ExpenseRow[]>([]);
 
-  const [incomeRows, setIncomeRows] = useState<
-    IncomeRow[]
-  >([]);
-
-  const [expenseRows, setExpenseRows] = useState<
-    ExpenseRow[]
-  >([]);
-
-  const [transferRows, setTransferRows] = useState<
-    TransferRow[]
-  >([]);
+  const [transferData, setTransferData] =
+    useState<TransferRow[]>([]);
 
   const [bankAccount, setBankAccount] =
     useState<BankAccount | null>(null);
@@ -279,18 +128,12 @@ export default function ReportsPage() {
   const [pettyCashAccount, setPettyCashAccount] =
     useState<PettyCashAccount | null>(null);
 
-  /* ============================================================
-     LOAD DATA
-  ============================================================ */
+  const [period, setPeriod] =
+    useState("ALL");
 
-  const loadData = async (isRefresh = false) => {
-    if (isRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-
-    setMsg("");
+  const loadReports = async () => {
+    setLoading(true);
+    setMessage("");
 
     try {
       const [
@@ -330,45 +173,40 @@ export default function ReportsPage() {
           .maybeSingle(),
       ]);
 
-      if (incomeResponse.error) {
+      if (incomeResponse.error)
         throw new Error(
           incomeResponse.error.message
         );
-      }
 
-      if (expenseResponse.error) {
+      if (expenseResponse.error)
         throw new Error(
           expenseResponse.error.message
         );
-      }
 
-      if (transferResponse.error) {
+      if (transferResponse.error)
         throw new Error(
           transferResponse.error.message
         );
-      }
 
-      if (bankResponse.error) {
+      if (bankResponse.error)
         throw new Error(
           bankResponse.error.message
         );
-      }
 
-      if (pettyCashResponse.error) {
+      if (pettyCashResponse.error)
         throw new Error(
           pettyCashResponse.error.message
         );
-      }
 
-      setIncomeRows(
+      setIncomeData(
         (incomeResponse.data || []) as IncomeRow[]
       );
 
-      setExpenseRows(
+      setExpenseData(
         (expenseResponse.data || []) as ExpenseRow[]
       );
 
-      setTransferRows(
+      setTransferData(
         (transferResponse.data || []) as TransferRow[]
       );
 
@@ -382,256 +220,197 @@ export default function ReportsPage() {
           | null
       );
     } catch (error: any) {
-      setMsg(
+      setMessage(
         error?.message ||
-          "Unable to load Reports & Analytics."
+          "Unable to load analytics."
       );
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    loadData();
+    loadReports();
   }, []);
 
-  /* ============================================================
-     AVAILABLE FINANCIAL YEARS
-  ============================================================ */
-
-  const financialYears = useMemo(() => {
-    const years = new Set<string>();
-
-    incomeRows.forEach((row) => {
-      const fy = getFinancialYearFromDate(
-        getRowDate(row)
-      );
-
-      if (fy) years.add(fy);
-    });
-
-    expenseRows.forEach((row) => {
-      const fy = getFinancialYearFromDate(
-        getRowDate(row)
-      );
-
-      if (fy) years.add(fy);
-    });
-
-    const currentFY = getCurrentFinancialYear();
-
-    years.add(currentFY);
-
-    return Array.from(years).sort((a, b) =>
-      b.localeCompare(a)
-    );
-  }, [incomeRows, expenseRows]);
-
-  /* ============================================================
-     FILTER DATA BY FINANCIAL YEAR
-  ============================================================ */
-
   const filteredIncome = useMemo(() => {
-    return incomeRows.filter((row) =>
-      isWithinFinancialYear(row, financialYear)
-    );
-  }, [incomeRows, financialYear]);
+    if (period === "ALL") return incomeData;
+
+    const now = new Date();
+
+    return incomeData.filter((row) => {
+      const rowDate = new Date(getDate(row));
+
+      if (Number.isNaN(rowDate.getTime()))
+        return true;
+
+      if (period === "YEAR") {
+        return (
+          rowDate.getFullYear() ===
+          now.getFullYear()
+        );
+      }
+
+      if (period === "MONTH") {
+        return (
+          rowDate.getFullYear() ===
+            now.getFullYear() &&
+          rowDate.getMonth() ===
+            now.getMonth()
+        );
+      }
+
+      return true;
+    });
+  }, [incomeData, period]);
 
   const filteredExpenses = useMemo(() => {
-    return expenseRows.filter((row) =>
-      isWithinFinancialYear(row, financialYear)
-    );
-  }, [expenseRows, financialYear]);
+    if (period === "ALL") return expenseData;
 
-  /* ============================================================
-     CORE FINANCIAL CALCULATIONS
-  ============================================================ */
+    const now = new Date();
+
+    return expenseData.filter((row) => {
+      const rowDate = new Date(getDate(row));
+
+      if (Number.isNaN(rowDate.getTime()))
+        return true;
+
+      if (period === "YEAR") {
+        return (
+          rowDate.getFullYear() ===
+          now.getFullYear()
+        );
+      }
+
+      if (period === "MONTH") {
+        return (
+          rowDate.getFullYear() ===
+            now.getFullYear() &&
+          rowDate.getMonth() ===
+            now.getMonth()
+        );
+      }
+
+      return true;
+    });
+  }, [expenseData, period]);
 
   const analytics = useMemo(() => {
-    const totalIncome = filteredIncome.reduce(
-      (sum, row) =>
-        sum + getNumber(row.amount),
-      0
-    );
+    const totalIncome =
+      filteredIncome.reduce(
+        (sum, row) =>
+          sum + Number(row.amount || 0),
+        0
+      );
 
-    const totalExpense = filteredExpenses.reduce(
-      (sum, row) =>
-        sum + getNumber(row.gross_amount),
-      0
-    );
-
-    const totalTds = filteredExpenses.reduce(
-      (sum, row) => {
-        if (
-          row.tds_amount !== null &&
-          row.tds_amount !== undefined
-        ) {
-          return (
-            sum +
-            Number(row.tds_amount || 0)
-          );
-        }
-
-        return (
+    const grossExpense =
+      filteredExpenses.reduce(
+        (sum, row) =>
           sum +
-          Number(row.gross_amount || 0) *
-            (Number(row.tds_rate || 0) / 100)
-        );
-      },
-      0
-    );
+          Number(row.gross_amount || 0),
+        0
+      );
 
-    const totalActualOutflow =
+    const netExpense =
       filteredExpenses.reduce(
         (sum, row) =>
           sum + getNetPayment(row),
         0
       );
 
-    const surplus =
-      totalIncome - totalExpense;
+    const totalTds =
+      filteredExpenses.reduce(
+        (sum, row) => {
+          const tds =
+            row.tds_amount !== null &&
+            row.tds_amount !== undefined
+              ? Number(
+                  row.tds_amount || 0
+                )
+              : Number(
+                  row.gross_amount || 0
+                ) *
+                (Number(row.tds_rate || 0) /
+                  100);
 
-    const bankIncome = filteredIncome
-      .filter((row) => {
-        const mode = normalise(row.mode);
-
-        return [
-          "cheque",
-          "online",
-          "bank transfer",
-          "upi",
-        ].includes(mode);
-      })
-      .reduce(
-        (sum, row) =>
-          sum + getNumber(row.amount),
+          return sum + tds;
+        },
         0
       );
 
-    const cashIncome = filteredIncome
-      .filter(
-        (row) =>
-          normalise(row.mode) === "cash"
-      )
-      .reduce(
-        (sum, row) =>
-          sum + getNumber(row.amount),
-        0
-      );
+    const bankIncome =
+      filteredIncome
+        .filter((row) => {
+          const mode = String(
+            row.mode || ""
+          )
+            .trim()
+            .toLowerCase();
 
-    const bankExpense = filteredExpenses
-      .filter((row) => {
-        const mode = normalise(
-          row.payment_mode
+          return [
+            "cheque",
+            "online",
+            "bank transfer",
+            "upi",
+          ].includes(mode);
+        })
+        .reduce(
+          (sum, row) =>
+            sum + Number(row.amount || 0),
+          0
         );
 
-        return [
-          "bank transfer",
-          "cheque",
-          "online",
-          "upi",
-        ].includes(mode);
-      })
-      .reduce(
-        (sum, row) =>
-          sum + getNetPayment(row),
-        0
-      );
+    const cashIncome =
+      filteredIncome
+        .filter((row) => {
+          return (
+            String(
+              row.mode || ""
+            )
+              .trim()
+              .toLowerCase() === "cash"
+          );
+        })
+        .reduce(
+          (sum, row) =>
+            sum + Number(row.amount || 0),
+          0
+        );
 
-    const pettyCashExpense =
+    const bankExpense =
       filteredExpenses
-        .filter(
-          (row) =>
-            normalise(
-              row.payment_mode
-            ) === "petty cash"
-        )
+        .filter((row) => {
+          const mode = String(
+            row.payment_mode || ""
+          )
+            .trim()
+            .toLowerCase();
+
+          return [
+            "bank transfer",
+            "cheque",
+            "online",
+            "upi",
+          ].includes(mode);
+        })
         .reduce(
           (sum, row) =>
             sum + getNetPayment(row),
           0
         );
 
-    return {
-      totalIncome,
-      totalExpense,
-      totalTds,
-      totalActualOutflow,
-      surplus,
-
-      bankIncome,
-      cashIncome,
-
-      bankExpense,
-      pettyCashExpense,
-    };
-  }, [filteredIncome, filteredExpenses]);
-
-  /* ============================================================
-     CURRENT FUND POSITION
-     
-     Uses all historical transactions because current
-     bank/petty-cash balances should not reset when the
-     analytics financial-year filter changes.
-  ============================================================ */
-
-  const fundPosition = useMemo(() => {
-    const allBankIncome = incomeRows
-      .filter((row) => {
-        const mode = normalise(row.mode);
-
-        return [
-          "cheque",
-          "online",
-          "bank transfer",
-          "upi",
-        ].includes(mode);
-      })
-      .reduce(
-        (sum, row) =>
-          sum + getNumber(row.amount),
-        0
-      );
-
-    const allCashIncome = incomeRows
-      .filter(
-        (row) =>
-          normalise(row.mode) === "cash"
-      )
-      .reduce(
-        (sum, row) =>
-          sum + getNumber(row.amount),
-        0
-      );
-
-    const allBankExpense = expenseRows
-      .filter((row) => {
-        const mode = normalise(
-          row.payment_mode
-        );
-
-        return [
-          "bank transfer",
-          "cheque",
-          "online",
-          "upi",
-        ].includes(mode);
-      })
-      .reduce(
-        (sum, row) =>
-          sum + getNetPayment(row),
-        0
-      );
-
-    const allPettyCashExpense =
-      expenseRows
-        .filter(
-          (row) =>
-            normalise(
-              row.payment_mode
-            ) === "petty cash"
-        )
+    const pettyCashExpense =
+      filteredExpenses
+        .filter((row) => {
+          return (
+            String(
+              row.payment_mode || ""
+            )
+              .trim()
+              .toLowerCase() ===
+            "petty cash"
+          );
+        })
         .reduce(
           (sum, row) =>
             sum + getNetPayment(row),
@@ -639,7 +418,7 @@ export default function ReportsPage() {
         );
 
     const bankToPettyCash =
-      transferRows
+      transferData
         .filter((row) => {
           const type = String(
             row.type || ""
@@ -652,12 +431,12 @@ export default function ReportsPage() {
         })
         .reduce(
           (sum, row) =>
-            sum + getNumber(row.amount),
+            sum + Number(row.amount || 0),
           0
         );
 
     const pettyCashToBank =
-      transferRows
+      transferData
         .filter((row) => {
           const type = String(
             row.type || ""
@@ -673,12 +452,12 @@ export default function ReportsPage() {
         })
         .reduce(
           (sum, row) =>
-            sum + getNumber(row.amount),
+            sum + Number(row.amount || 0),
           0
         );
 
     const bankAdjustmentCredit =
-      transferRows
+      transferData
         .filter(
           (row) =>
             row.type ===
@@ -687,12 +466,12 @@ export default function ReportsPage() {
         )
         .reduce(
           (sum, row) =>
-            sum + getNumber(row.amount),
+            sum + Number(row.amount || 0),
           0
         );
 
     const bankAdjustmentDebit =
-      transferRows
+      transferData
         .filter(
           (row) =>
             row.type ===
@@ -701,208 +480,173 @@ export default function ReportsPage() {
         )
         .reduce(
           (sum, row) =>
-            sum + getNumber(row.amount),
+            sum + Number(row.amount || 0),
           0
         );
 
     const cashAdjustmentCredit =
-      transferRows
-        .filter((row) => {
-          const type = String(
-            row.type || ""
-          ).trim();
-
-          return (
+      transferData
+        .filter(
+          (row) =>
             [
               "Cash Adjustment",
               "Cash Adjustment +",
-            ].includes(type) &&
+            ].includes(
+              String(row.type || "")
+            ) &&
             row.direction === "IN"
-          );
-        })
+        )
         .reduce(
           (sum, row) =>
-            sum + getNumber(row.amount),
+            sum + Number(row.amount || 0),
           0
         );
 
     const cashAdjustmentDebit =
-      transferRows
-        .filter((row) => {
-          const type = String(
-            row.type || ""
-          ).trim();
-
-          return (
+      transferData
+        .filter(
+          (row) =>
             [
               "Cash Adjustment",
               "Cash Adjustment -",
-            ].includes(type) &&
+            ].includes(
+              String(row.type || "")
+            ) &&
             row.direction === "OUT"
-          );
-        })
+        )
         .reduce(
           (sum, row) =>
-            sum + getNumber(row.amount),
+            sum + Number(row.amount || 0),
           0
         );
 
-    const bank =
+    const currentBank =
       Number(
         bankAccount?.opening_balance || 0
       ) +
-      allBankIncome -
-      allBankExpense -
+      bankIncome -
+      bankExpense -
       bankToPettyCash +
       pettyCashToBank +
       bankAdjustmentCredit -
       bankAdjustmentDebit;
 
-    const pettyCash =
+    const currentPettyCash =
       Number(
         pettyCashAccount?.opening_balance ||
           0
       ) +
-      allCashIncome +
+      cashIncome +
       bankToPettyCash -
-      allPettyCashExpense -
+      pettyCashExpense -
       pettyCashToBank +
       cashAdjustmentCredit -
       cashAdjustmentDebit;
 
+    const availableFunds =
+      currentBank + currentPettyCash;
+
+    const surplus =
+      totalIncome - grossExpense;
+
+    const expenseRatio =
+      totalIncome > 0
+        ? (grossExpense / totalIncome) *
+          100
+        : 0;
+
+    const savingsRatio =
+      totalIncome > 0
+        ? (surplus / totalIncome) * 100
+        : 0;
+
     return {
-      bank,
-      pettyCash,
-      total: bank + pettyCash,
-      bankToPettyCash,
-      pettyCashToBank,
+      totalIncome,
+      grossExpense,
+      netExpense,
+      totalTds,
+
+      bankIncome,
+      cashIncome,
+
+      bankExpense,
+      pettyCashExpense,
+
+      currentBank,
+      currentPettyCash,
+      availableFunds,
+
+      surplus,
+      expenseRatio,
+      savingsRatio,
     };
   }, [
-    incomeRows,
-    expenseRows,
-    transferRows,
+    filteredIncome,
+    filteredExpenses,
+    transferData,
     bankAccount,
     pettyCashAccount,
   ]);
 
-  /* ============================================================
-     MONTHLY TREND
-     
-     Financial year starts in April and ends in March.
-  ============================================================ */
-
   const monthlyData = useMemo(() => {
-    const startYear = Number(
-      financialYear.split("-")[0]
-    );
-
-    const months: MonthlyData[] = [];
-
-    for (let position = 0; position < 12; position++) {
-      const calendarMonth =
-        (position + 3) % 12;
-
-      const calendarYear =
-        calendarMonth >= 3
-          ? startYear
-          : startYear + 1;
-
-      const income = filteredIncome
-        .filter((row) => {
-          const value = getRowDate(row);
-
-          if (!value) return false;
-
-          const date = new Date(value);
-
-          return (
-            date.getMonth() ===
-              calendarMonth &&
-            date.getFullYear() ===
-              calendarYear
-          );
-        })
-        .reduce(
-          (sum, row) =>
-            sum + getNumber(row.amount),
-          0
-        );
-
-      const expense = filteredExpenses
-        .filter((row) => {
-          const value = getRowDate(row);
-
-          if (!value) return false;
-
-          const date = new Date(value);
-
-          return (
-            date.getMonth() ===
-              calendarMonth &&
-            date.getFullYear() ===
-              calendarYear
-          );
-        })
-        .reduce(
-          (sum, row) =>
-            sum +
-            getNumber(row.gross_amount),
-          0
-        );
-
-      months.push({
-        month: MONTHS[calendarMonth],
-        shortMonth:
-          SHORT_MONTHS[calendarMonth],
-        income,
-        expense,
-        surplus: income - expense,
-      });
-    }
-
-    return months;
-  }, [
-    filteredIncome,
-    filteredExpenses,
-    financialYear,
-  ]);
-
-  /* ============================================================
-     INCOME CATEGORY ANALYSIS
-  ============================================================ */
-
-  const incomeCategories = useMemo(() => {
-    const map = new Map<string, number>();
+    const months: Record<
+      string,
+      {
+        income: number;
+        expense: number;
+      }
+    > = {};
 
     filteredIncome.forEach((row) => {
-      const category =
-        row.category ||
-        row.income_category ||
-        row.source ||
-        "Uncategorised";
+      const key = getMonthKey(
+        getDate(row)
+      );
 
-      map.set(
-        category,
-        (map.get(category) || 0) +
-          getNumber(row.amount)
+      if (!months[key]) {
+        months[key] = {
+          income: 0,
+          expense: 0,
+        };
+      }
+
+      months[key].income += Number(
+        row.amount || 0
       );
     });
 
-    return Array.from(map.entries())
-      .map(([name, value]) => ({
-        name,
-        value,
+    filteredExpenses.forEach((row) => {
+      const key = getMonthKey(
+        getDate(row)
+      );
+
+      if (!months[key]) {
+        months[key] = {
+          income: 0,
+          expense: 0,
+        };
+      }
+
+      months[key].expense += Number(
+        row.gross_amount || 0
+      );
+    });
+
+    return Object.entries(months)
+      .map(([month, values]) => ({
+        month,
+        ...values,
       }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
-  }, [filteredIncome]);
+      .slice(-6);
+  }, [
+    filteredIncome,
+    filteredExpenses,
+  ]);
 
-  /* ============================================================
-     EXPENSE CATEGORY ANALYSIS
-  ============================================================ */
-
-  const expenseCategories = useMemo(() => {
-    const map = new Map<string, number>();
+  const categoryData = useMemo(() => {
+    const categories: Record<
+      string,
+      number
+    > = {};
 
     filteredExpenses.forEach((row) => {
       const category =
@@ -910,285 +654,97 @@ export default function ReportsPage() {
         row.expense_category ||
         "Uncategorised";
 
-      map.set(
-        category,
-        (map.get(category) || 0) +
-          getNumber(row.gross_amount)
-      );
+      categories[category] =
+        (categories[category] || 0) +
+        Number(row.gross_amount || 0);
     });
 
-    return Array.from(map.entries())
-      .map(([name, value]) => ({
-        name,
-        value,
+    return Object.entries(categories)
+      .map(([category, amount]) => ({
+        category,
+        amount,
       }))
-      .sort((a, b) => b.value - a.value)
+      .sort(
+        (a, b) =>
+          b.amount - a.amount
+      )
       .slice(0, 6);
   }, [filteredExpenses]);
 
-  /* ============================================================
-     TOP EXPENSES
-  ============================================================ */
+  const incomeModeData = useMemo(() => {
+    const modes: Record<
+      string,
+      number
+    > = {};
 
-  const topExpenses = useMemo(() => {
-    return [...filteredExpenses]
+    filteredIncome.forEach((row) => {
+      const mode =
+        row.mode || "Other";
+
+      modes[mode] =
+        (modes[mode] || 0) +
+        Number(row.amount || 0);
+    });
+
+    return Object.entries(modes)
+      .map(([mode, amount]) => ({
+        mode,
+        amount,
+      }))
       .sort(
         (a, b) =>
-          getNumber(b.gross_amount) -
-          getNumber(a.gross_amount)
+          b.amount - a.amount
+      );
+  }, [filteredIncome]);
+
+  const maxMonthlyValue = Math.max(
+    ...monthlyData.flatMap((item) => [
+      item.income,
+      item.expense,
+    ]),
+    1
+  );
+
+  const maxCategoryValue = Math.max(
+    ...categoryData.map(
+      (item) => item.amount
+    ),
+    1
+  );
+
+  const healthScore = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        50 +
+          analytics.savingsRatio / 2 +
+          (analytics.availableFunds > 0
+            ? 15
+            : -20)
       )
-      .slice(0, 5);
-  }, [filteredExpenses]);
-
-  /* ============================================================
-     FINANCIAL HEALTH SCORE
-  ============================================================ */
-
-  const health = useMemo(() => {
-    let score = 50;
-
-    const income =
-      analytics.totalIncome;
-
-    const expense =
-      analytics.totalExpense;
-
-    const surplus =
-      analytics.surplus;
-
-    /* Positive surplus */
-
-    if (income > 0 && surplus >= 0) {
-      score += 15;
-    } else if (surplus < 0) {
-      score -= 15;
-    }
-
-    /* Expense ratio */
-
-    if (income > 0) {
-      const expenseRatio =
-        expense / income;
-
-      if (expenseRatio <= 0.7) {
-        score += 15;
-      } else if (expenseRatio <= 0.9) {
-        score += 8;
-      } else if (expenseRatio > 1) {
-        score -= 10;
-      }
-    }
-
-    /* Available funds */
-
-    if (fundPosition.total > 0) {
-      score += 10;
-    }
-
-    /* Bank liquidity */
-
-    if (fundPosition.bank > 0) {
-      score += 5;
-    }
-
-    /* Petty cash should not be negative */
-
-    if (fundPosition.pettyCash >= 0) {
-      score += 5;
-    } else {
-      score -= 10;
-    }
-
-    score = Math.max(
-      0,
-      Math.min(100, Math.round(score))
-    );
-
-    let label = "Critical";
-
-    if (score >= 85) {
-      label = "Excellent";
-    } else if (score >= 70) {
-      label = "Healthy";
-    } else if (score >= 50) {
-      label = "Needs Attention";
-    }
-
-    return {
-      score,
-      label,
-    };
-  }, [analytics, fundPosition]);
-
-  /* ============================================================
-     SMART INSIGHTS
-  ============================================================ */
-
-  const insights = useMemo(() => {
-    const list: {
-      icon: string;
-      title: string;
-      description: string;
-    }[] = [];
-
-    if (
-      analytics.totalIncome === 0 &&
-      analytics.totalExpense === 0
-    ) {
-      list.push({
-        icon: "ℹ️",
-        title: "No transactions found",
-        description:
-          "There are no cleared income or paid expense transactions for the selected financial year.",
-      });
-
-      return list;
-    }
-
-    if (analytics.surplus >= 0) {
-      list.push({
-        icon: "📈",
-        title: "Positive financial position",
-        description: `GPCC has generated a surplus of ${money(
-          analytics.surplus
-        )} for FY ${financialYear}.`,
-      });
-    } else {
-      list.push({
-        icon: "⚠️",
-        title: "Expenditure exceeds income",
-        description: `Expenses are higher than income by ${money(
-          Math.abs(
-            analytics.surplus
-          )
-        )}.`,
-      });
-    }
-
-    if (expenseCategories.length > 0) {
-      const top =
-        expenseCategories[0];
-
-      const percentage =
-        analytics.totalExpense > 0
-          ? (
-              (top.value /
-                analytics.totalExpense) *
-              100
-            ).toFixed(1)
-          : "0";
-
-      list.push({
-        icon: "💸",
-        title: "Largest expense concentration",
-        description: `${top.name} represents ${percentage}% of total expenditure.`,
-      });
-    }
-
-    if (
-      fundPosition.bank >
-      fundPosition.pettyCash
-    ) {
-      list.push({
-        icon: "🏦",
-        title: "Bank-dominant liquidity",
-        description: `The majority of available GPCC funds are currently held in the bank account.`,
-      });
-    } else if (
-      fundPosition.pettyCash > 0
-    ) {
-      list.push({
-        icon: "💵",
-        title: "Higher petty cash concentration",
-        description:
-          "Review whether the current petty cash level is aligned with GPCC operational requirements.",
-      });
-    }
-
-    if (analytics.totalTds > 0) {
-      list.push({
-        icon: "🧾",
-        title: "TDS monitoring required",
-        description: `Total TDS recorded for this financial year is ${money(
-          analytics.totalTds
-        )}.`,
-      });
-    }
-
-    return list.slice(0, 4);
-  }, [
-    analytics,
-    expenseCategories,
-    fundPosition,
-    financialYear,
-  ]);
-
-  /* ============================================================
-     CHART VALUES
-  ============================================================ */
-
-  const maxMonthlyValue =
-    Math.max(
-      ...monthlyData.flatMap((row) => [
-        row.income,
-        row.expense,
-      ]),
-      1
-    );
-
-  const bankShare =
-    fundPosition.total !== 0
-      ? Math.max(
-          0,
-          Math.min(
-            100,
-            (fundPosition.bank /
-              fundPosition.total) *
-              100
-          )
-        )
-      : 0;
-
-  const pettyCashShare =
-    fundPosition.total !== 0
-      ? Math.max(
-          0,
-          Math.min(
-            100,
-            (fundPosition.pettyCash /
-              fundPosition.total) *
-              100
-          )
-        )
-      : 0;
-
-  /* ============================================================
-     LOADING
-  ============================================================ */
+    )
+  );
 
   if (loading) {
     return (
       <div className="card">
         <h2>
-          Loading Financial Intelligence...
+          Loading Reports & Analytics...
         </h2>
 
         <p className="muted">
-          Analysing GPCC financial data.
+          Preparing financial intelligence.
         </p>
       </div>
     );
   }
 
-  /* ============================================================
-     RENDER
-  ============================================================ */
-
   return (
-    <div>
-      {/* ========================================================
+    <>
+      {/* =====================================
           PAGE HEADER
-      ========================================================= */}
+      ====================================== */}
 
       <div className="pageHead">
         <div>
@@ -1211,41 +767,39 @@ export default function ReportsPage() {
         >
           <select
             className="input"
-            value={financialYear}
+            style={{
+              width: 170,
+            }}
+            value={period}
             onChange={(e) =>
-              setFinancialYear(
+              setPeriod(
                 e.target.value
               )
             }
-            style={{
-              minWidth: 130,
-            }}
           >
-            {financialYears.map((fy) => (
-              <option
-                key={fy}
-                value={fy}
-              >
-                FY {fy}
-              </option>
-            ))}
+            <option value="ALL">
+              All Time
+            </option>
+
+            <option value="YEAR">
+              Current Year
+            </option>
+
+            <option value="MONTH">
+              Current Month
+            </option>
           </select>
 
           <button
             className="btn secondary"
-            onClick={() =>
-              loadData(true)
-            }
-            disabled={refreshing}
+            onClick={loadReports}
           >
-            {refreshing
-              ? "Refreshing..."
-              : "Refresh"}
+            ↻ Refresh
           </button>
         </div>
       </div>
 
-      {msg && (
+      {message && (
         <div
           className="card"
           style={{
@@ -1253,13 +807,13 @@ export default function ReportsPage() {
             color: "#b42318",
           }}
         >
-          {msg}
+          {message}
         </div>
       )}
 
-      {/* ========================================================
-          EXECUTIVE KPI SECTION
-      ========================================================= */}
+      {/* =====================================
+          EXECUTIVE SUMMARY
+      ====================================== */}
 
       <div className="grid">
         <div className="card">
@@ -1268,94 +822,259 @@ export default function ReportsPage() {
           </div>
 
           <div className="metric">
-            {compactMoney(
+            {money(
               analytics.totalIncome
             )}
           </div>
 
-          <div
-            className="muted"
-            style={{
-              marginTop: 8,
-              fontSize: 13,
-            }}
-          >
-            FY {financialYear}
+          <div className="muted">
+            Cleared collections
           </div>
         </div>
 
         <div className="card">
           <div className="muted">
-            💸 Total Expenditure
+            💸 Total Expense
           </div>
 
           <div className="metric">
-            {compactMoney(
-              analytics.totalExpense
+            {money(
+              analytics.grossExpense
             )}
           </div>
 
-          <div
-            className="muted"
-            style={{
-              marginTop: 8,
-              fontSize: 13,
-            }}
-          >
-            Gross expenditure
+          <div className="muted">
+            Approved expenditure
           </div>
         </div>
 
         <div className="card">
           <div className="muted">
-            📈 Net Surplus / Deficit
+            📊 Financial Surplus
           </div>
 
-          <div className="metric">
-            {compactMoney(
+          <div
+            className="metric"
+            style={{
+              color:
+                analytics.surplus >= 0
+                  ? "#16a34a"
+                  : "#dc2626",
+            }}
+          >
+            {money(
               analytics.surplus
             )}
           </div>
 
-          <div
-            className="muted"
-            style={{
-              marginTop: 8,
-              fontSize: 13,
-            }}
-          >
-            {analytics.surplus >= 0
-              ? "Positive financial position"
-              : "Attention required"}
+          <div className="muted">
+            Income − Gross Expense
           </div>
         </div>
 
         <div className="card">
           <div className="muted">
-            🏦 Total Available Funds
+            🏦 Available Funds
           </div>
 
           <div className="metric">
-            {compactMoney(
-              fundPosition.total
+            {money(
+              analytics.availableFunds
             )}
           </div>
 
-          <div
-            className="muted"
-            style={{
-              marginTop: 8,
-              fontSize: 13,
-            }}
-          >
-            Current bank + petty cash
+          <div className="muted">
+            Bank + Petty Cash
           </div>
         </div>
       </div>
 
-      {/* ========================================================
-          FINANCIAL PERFORMANCE TREND
-      ========================================================= */}
+      {/* =====================================
+          FINANCIAL HEALTH
+      ====================================== */}
+
+      <div
+        className="grid"
+        style={{
+          marginTop: 20,
+        }}
+      >
+        <div className="card">
+          <h3>
+            Financial Health Score
+          </h3>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 25,
+              marginTop: 20,
+            }}
+          >
+            <div
+              style={{
+                width: 120,
+                height: 120,
+                borderRadius: "50%",
+                border:
+                  "10px solid rgba(22,163,74,.2)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "column",
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 30,
+                  fontWeight: 700,
+                }}
+              >
+                {healthScore}
+              </div>
+
+              <div className="muted">
+                /100
+              </div>
+            </div>
+
+            <div>
+              <h2
+                style={{
+                  marginBottom: 8,
+                }}
+              >
+                {healthScore >= 75
+                  ? "Healthy"
+                  : healthScore >= 50
+                  ? "Stable"
+                  : "Attention Required"}
+              </h2>
+
+              <p className="muted">
+                Based on fund
+                availability and surplus
+                performance.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <h3>
+            Key Financial Ratios
+          </h3>
+
+          <div
+            style={{
+              marginTop: 20,
+            }}
+          >
+            <div
+              style={{
+                marginBottom: 18,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent:
+                    "space-between",
+                }}
+              >
+                <span>
+                  Expense Ratio
+                </span>
+
+                <strong>
+                  {analytics.expenseRatio.toFixed(
+                    1
+                  )}
+                  %
+                </strong>
+              </div>
+
+              <div
+                style={{
+                  height: 8,
+                  background:
+                    "rgba(100,116,139,.15)",
+                  borderRadius: 10,
+                  marginTop: 8,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.min(
+                      analytics.expenseRatio,
+                      100
+                    )}%`,
+                    height: "100%",
+                    background:
+                      "#f97316",
+                    borderRadius: 10,
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent:
+                    "space-between",
+                }}
+              >
+                <span>
+                  Surplus Ratio
+                </span>
+
+                <strong>
+                  {analytics.savingsRatio.toFixed(
+                    1
+                  )}
+                  %
+                </strong>
+              </div>
+
+              <div
+                style={{
+                  height: 8,
+                  background:
+                    "rgba(100,116,139,.15)",
+                  borderRadius: 10,
+                  marginTop: 8,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.max(
+                      0,
+                      Math.min(
+                        analytics.savingsRatio,
+                        100
+                      )
+                    )}%`,
+                    height: "100%",
+                    background:
+                      "#16a34a",
+                    borderRadius: 10,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* =====================================
+          INCOME VS EXPENSE TREND
+      ====================================== */}
 
       <div
         className="card"
@@ -1369,31 +1088,27 @@ export default function ReportsPage() {
             justifyContent:
               "space-between",
             alignItems: "center",
-            marginBottom: 20,
+            marginBottom: 30,
             flexWrap: "wrap",
             gap: 10,
           }}
         >
           <div>
-            <h3
-              style={{
-                marginBottom: 5,
-              }}
-            >
-              📈 Financial Performance Trend
+            <h3>
+              Income vs Expense Trend
             </h3>
 
             <p className="muted">
-              Monthly income versus
-              expenditure
+              Financial movement over
+              recent reporting periods.
             </p>
           </div>
 
           <div
+            className="muted"
             style={{
               display: "flex",
-              gap: 14,
-              fontSize: 13,
+              gap: 15,
             }}
           >
             <span>
@@ -1406,205 +1121,260 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        <div
-          style={{
-            overflowX: "auto",
-          }}
-        >
+        {monthlyData.length === 0 ? (
+          <p className="muted">
+            No transaction data available.
+          </p>
+        ) : (
           <div
             style={{
-              minWidth: 700,
-              height: 310,
               display: "flex",
               alignItems: "flex-end",
-              gap: 12,
-              padding:
-                "20px 10px 0 10px",
-              borderBottom:
-                "1px solid var(--border, #ddd)",
+              gap: 18,
+              height: 280,
+              overflowX: "auto",
+              paddingBottom: 10,
             }}
           >
             {monthlyData.map(
-              (item) => {
-                const incomeHeight =
-                  (item.income /
-                    maxMonthlyValue) *
-                  220;
-
-                const expenseHeight =
-                  (item.expense /
-                    maxMonthlyValue) *
-                  220;
-
-                return (
+              (item) => (
+                <div
+                  key={item.month}
+                  style={{
+                    minWidth: 85,
+                    flex: 1,
+                    height: "100%",
+                    display: "flex",
+                    flexDirection:
+                      "column",
+                    justifyContent:
+                      "flex-end",
+                  }}
+                >
                   <div
-                    key={item.month}
                     style={{
-                      flex: 1,
-                      minWidth: 45,
-                      height: "100%",
                       display: "flex",
-                      flexDirection:
-                        "column",
-                      justifyContent:
+                      gap: 7,
+                      alignItems:
                         "flex-end",
-                      alignItems: "center",
+                      height: 210,
+                    }}
+                  >
+                    <div
+                      title={money(
+                        item.income
+                      )}
+                      style={{
+                        flex: 1,
+                        height: `${
+                          (item.income /
+                            maxMonthlyValue) *
+                          100
+                        }%`,
+                        minHeight:
+                          item.income > 0
+                            ? 4
+                            : 0,
+                        background:
+                          "#16a34a",
+                        borderRadius:
+                          "8px 8px 0 0",
+                      }}
+                    />
+
+                    <div
+                      title={money(
+                        item.expense
+                      )}
+                      style={{
+                        flex: 1,
+                        height: `${
+                          (item.expense /
+                            maxMonthlyValue) *
+                          100
+                        }%`,
+                        minHeight:
+                          item.expense > 0
+                            ? 4
+                            : 0,
+                        background:
+                          "#f97316",
+                        borderRadius:
+                          "8px 8px 0 0",
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      textAlign: "center",
+                      marginTop: 10,
+                      fontSize: 12,
+                    }}
+                  >
+                    {item.month}
+                  </div>
+                </div>
+              )
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* =====================================
+          EXPENSE CATEGORY + INCOME MODE
+      ====================================== */}
+
+      <div
+        className="grid"
+        style={{
+          marginTop: 20,
+        }}
+      >
+        <div className="card">
+          <h3>
+            Expense Category Analysis
+          </h3>
+
+          <p className="muted">
+            Where GPCC funds are being
+            utilized.
+          </p>
+
+          <div
+            style={{
+              marginTop: 25,
+            }}
+          >
+            {categoryData.length ===
+            0 ? (
+              <p className="muted">
+                No expense categories
+                available.
+              </p>
+            ) : (
+              categoryData.map(
+                (item) => (
+                  <div
+                    key={item.category}
+                    style={{
+                      marginBottom: 18,
                     }}
                   >
                     <div
                       style={{
-                        width: "100%",
-                        height: 235,
                         display: "flex",
-                        alignItems:
-                          "flex-end",
                         justifyContent:
-                          "center",
-                        gap: 5,
+                          "space-between",
+                        gap: 15,
+                        marginBottom: 7,
                       }}
                     >
-                      <div
-                        title={`Income: ${money(
-                          item.income
-                        )}`}
-                        style={{
-                          width: 16,
-                          minHeight:
-                            item.income > 0
-                              ? 4
-                              : 0,
-                          height:
-                            incomeHeight,
-                          background:
-                            "var(--primary, #16a34a)",
-                          borderRadius:
-                            "5px 5px 0 0",
-                        }}
-                      />
+                      <span>
+                        {item.category}
+                      </span>
 
-                      <div
-                        title={`Expense: ${money(
-                          item.expense
-                        )}`}
-                        style={{
-                          width: 16,
-                          minHeight:
-                            item.expense > 0
-                              ? 4
-                              : 0,
-                          height:
-                            expenseHeight,
-                          background:
-                            "var(--danger, #dc2626)",
-                          borderRadius:
-                            "5px 5px 0 0",
-                        }}
-                      />
+                      <strong>
+                        {money(
+                          item.amount
+                        )}
+                      </strong>
                     </div>
 
                     <div
                       style={{
-                        marginTop: 10,
-                        fontSize: 12,
-                        textAlign:
-                          "center",
+                        height: 10,
+                        background:
+                          "rgba(100,116,139,.15)",
+                        borderRadius: 10,
+                        overflow: "hidden",
                       }}
                     >
-                      {item.shortMonth}
+                      <div
+                        style={{
+                          width: `${
+                            (item.amount /
+                              maxCategoryValue) *
+                            100
+                          }%`,
+                          height: "100%",
+                          background:
+                            "#8b5cf6",
+                          borderRadius: 10,
+                        }}
+                      />
                     </div>
                   </div>
-                );
-              }
+                )
+              )
             )}
           </div>
         </div>
-      </div>
-
-      {/* ========================================================
-          CATEGORY INTELLIGENCE
-      ========================================================= */}
-
-      <div
-        className="grid"
-        style={{
-          marginTop: 20,
-        }}
-      >
-        {/* INCOME INTELLIGENCE */}
 
         <div className="card">
           <h3>
-            💰 Income Intelligence
+            Income Collection Channels
           </h3>
 
-          <p
-            className="muted"
-            style={{
-              marginBottom: 20,
-            }}
-          >
-            Top income sources for FY{" "}
-            {financialYear}
+          <p className="muted">
+            Distribution of collections
+            by payment mode.
           </p>
 
-          {incomeCategories.length === 0 ? (
-            <p className="muted">
-              No income data available.
-            </p>
-          ) : (
-            <div
-              style={{
-                display: "flex",
-                flexDirection:
-                  "column",
-                gap: 16,
-              }}
-            >
-              {incomeCategories.map(
+          <div
+            style={{
+              marginTop: 25,
+            }}
+          >
+            {incomeModeData.length ===
+            0 ? (
+              <p className="muted">
+                No income data available.
+              </p>
+            ) : (
+              incomeModeData.map(
                 (item) => {
                   const percentage =
                     analytics.totalIncome > 0
-                      ? Math.max(
-                          3,
-                          (item.value /
-                            analytics.totalIncome) *
-                            100
-                        )
+                      ? (item.amount /
+                          analytics.totalIncome) *
+                        100
                       : 0;
 
                   return (
                     <div
-                      key={item.name}
+                      key={item.mode}
+                      style={{
+                        marginBottom: 18,
+                      }}
                     >
                       <div
                         style={{
-                          display:
-                            "flex",
+                          display: "flex",
                           justifyContent:
                             "space-between",
-                          gap: 10,
                           marginBottom: 7,
                         }}
                       >
                         <span>
-                          {item.name}
+                          {item.mode}
                         </span>
 
                         <strong>
-                          {compactMoney(
-                            item.value
+                          {percentage.toFixed(
+                            1
                           )}
+                          %
                         </strong>
                       </div>
 
                       <div
                         style={{
-                          height: 8,
+                          height: 10,
                           background:
-                            "rgba(127,127,127,0.15)",
-                          borderRadius: 99,
-                          overflow:
-                            "hidden",
+                            "rgba(100,116,139,.15)",
+                          borderRadius: 10,
+                          overflow: "hidden",
                         }}
                       >
                         <div
@@ -1612,119 +1382,35 @@ export default function ReportsPage() {
                             width: `${percentage}%`,
                             height: "100%",
                             background:
-                              "var(--primary, #16a34a)",
-                            borderRadius: 99,
+                              "#0ea5e9",
+                            borderRadius: 10,
                           }}
                         />
+                      </div>
+
+                      <div
+                        className="muted"
+                        style={{
+                          marginTop: 4,
+                          fontSize: 12,
+                        }}
+                      >
+                        {money(
+                          item.amount
+                        )}
                       </div>
                     </div>
                   );
                 }
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* EXPENSE INTELLIGENCE */}
-
-        <div className="card">
-          <h3>
-            💸 Expense Intelligence
-          </h3>
-
-          <p
-            className="muted"
-            style={{
-              marginBottom: 20,
-            }}
-          >
-            Where GPCC funds are being
-            utilised
-          </p>
-
-          {expenseCategories.length === 0 ? (
-            <p className="muted">
-              No expenditure data
-              available.
-            </p>
-          ) : (
-            <div
-              style={{
-                display: "flex",
-                flexDirection:
-                  "column",
-                gap: 16,
-              }}
-            >
-              {expenseCategories.map(
-                (item) => {
-                  const percentage =
-                    analytics.totalExpense > 0
-                      ? Math.max(
-                          3,
-                          (item.value /
-                            analytics.totalExpense) *
-                            100
-                        )
-                      : 0;
-
-                  return (
-                    <div
-                      key={item.name}
-                    >
-                      <div
-                        style={{
-                          display:
-                            "flex",
-                          justifyContent:
-                            "space-between",
-                          gap: 10,
-                          marginBottom: 7,
-                        }}
-                      >
-                        <span>
-                          {item.name}
-                        </span>
-
-                        <strong>
-                          {compactMoney(
-                            item.value
-                          )}
-                        </strong>
-                      </div>
-
-                      <div
-                        style={{
-                          height: 8,
-                          background:
-                            "rgba(127,127,127,0.15)",
-                          borderRadius: 99,
-                          overflow:
-                            "hidden",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: `${percentage}%`,
-                            height: "100%",
-                            background:
-                              "var(--danger, #dc2626)",
-                            borderRadius: 99,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                }
-              )}
-            </div>
-          )}
+              )
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ========================================================
-          FUND FLOW + FINANCIAL HEALTH
-      ========================================================= */}
+      {/* =====================================
+          FUND POSITION
+      ====================================== */}
 
       <div
         className="grid"
@@ -1732,69 +1418,23 @@ export default function ReportsPage() {
           marginTop: 20,
         }}
       >
-        {/* FUND FLOW */}
-
         <div className="card">
           <h3>
-            🏦 Current Fund Distribution
+            Current Fund Distribution
           </h3>
 
-          <p
-            className="muted"
-            style={{
-              marginBottom: 25,
-            }}
-          >
-            Real-time distribution of
-            GPCC available funds
-          </p>
-
           <div
             style={{
-              display: "flex",
-              height: 22,
-              borderRadius: 99,
-              overflow: "hidden",
-              background:
-                "rgba(127,127,127,0.15)",
-              marginBottom: 25,
-            }}
-          >
-            {bankShare > 0 && (
-              <div
-                style={{
-                  width: `${bankShare}%`,
-                  background:
-                    "var(--primary, #16a34a)",
-                }}
-              />
-            )}
-
-            {pettyCashShare > 0 && (
-              <div
-                style={{
-                  width: `${pettyCashShare}%`,
-                  background:
-                    "#f59e0b",
-                }}
-              />
-            )}
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                "1fr 1fr",
-              gap: 15,
+              marginTop: 25,
             }}
           >
             <div
               style={{
-                padding: 16,
-                border:
-                  "1px solid var(--border, #ddd)",
-                borderRadius: 12,
+                padding: 20,
+                borderRadius: 14,
+                background:
+                  "rgba(14,165,233,.08)",
+                marginBottom: 15,
               }}
             >
               <div className="muted">
@@ -1803,34 +1443,23 @@ export default function ReportsPage() {
 
               <div
                 style={{
-                  fontSize: 22,
+                  fontSize: 26,
                   fontWeight: 700,
-                  marginTop: 7,
+                  marginTop: 6,
                 }}
               >
-                {compactMoney(
-                  fundPosition.bank
+                {money(
+                  analytics.currentBank
                 )}
-              </div>
-
-              <div
-                className="muted"
-                style={{
-                  marginTop: 5,
-                  fontSize: 12,
-                }}
-              >
-                {bankShare.toFixed(1)}%
-                of total funds
               </div>
             </div>
 
             <div
               style={{
-                padding: 16,
-                border:
-                  "1px solid var(--border, #ddd)",
-                borderRadius: 12,
+                padding: 20,
+                borderRadius: 14,
+                background:
+                  "rgba(22,163,74,.08)",
               }}
             >
               <div className="muted">
@@ -1839,220 +1468,95 @@ export default function ReportsPage() {
 
               <div
                 style={{
-                  fontSize: 22,
+                  fontSize: 26,
                   fontWeight: 700,
-                  marginTop: 7,
+                  marginTop: 6,
                 }}
               >
-                {compactMoney(
-                  fundPosition.pettyCash
+                {money(
+                  analytics.currentPettyCash
                 )}
               </div>
-
-              <div
-                className="muted"
-                style={{
-                  marginTop: 5,
-                  fontSize: 12,
-                }}
-              >
-                {pettyCashShare.toFixed(
-                  1
-                )}
-                % of total funds
-              </div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              marginTop: 20,
-              paddingTop: 20,
-              borderTop:
-                "1px solid var(--border, #ddd)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
-              }}
-            >
-              <span>
-                Bank → Petty Cash
-              </span>
-
-              <strong>
-                {money(
-                  fundPosition.bankToPettyCash
-                )}
-              </strong>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
-                marginTop: 12,
-              }}
-            >
-              <span>
-                Petty Cash → Bank
-              </span>
-
-              <strong>
-                {money(
-                  fundPosition.pettyCashToBank
-                )}
-              </strong>
             </div>
           </div>
         </div>
 
-        {/* FINANCIAL HEALTH */}
-
         <div className="card">
           <h3>
-            ❤️ Financial Health Score
+            Compliance & TDS Overview
           </h3>
 
-          <p
-            className="muted"
-            style={{
-              marginBottom: 20,
-            }}
-          >
-            Automated assessment of
-            GPCC financial stability
-          </p>
-
           <div
             style={{
-              display: "flex",
-              justifyContent:
-                "center",
-              margin: "20px 0 30px",
+              marginTop: 25,
             }}
           >
             <div
               style={{
-                width: 190,
-                height: 190,
-                borderRadius: "50%",
-                display: "flex",
-                flexDirection:
-                  "column",
-                justifyContent:
-                  "center",
-                alignItems: "center",
-                border:
-                  "10px solid var(--primary, #16a34a)",
+                marginBottom: 25,
               }}
             >
-              <div
-                style={{
-                  fontSize: 52,
-                  fontWeight: 800,
-                  lineHeight: 1,
-                }}
-              >
-                {health.score}
+              <div className="muted">
+                Total Gross Expense
               </div>
 
               <div
-                className="muted"
                 style={{
-                  marginTop: 8,
+                  fontSize: 28,
+                  fontWeight: 700,
                 }}
               >
-                / 100
-              </div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              textAlign: "center",
-              fontSize: 20,
-              fontWeight: 700,
-              marginBottom: 25,
-            }}
-          >
-            {health.label}
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gap: 10,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
-              }}
-            >
-              <span>
-                Income vs Expense
-              </span>
-
-              <strong>
-                {analytics.totalIncome > 0
-                  ? `${(
-                      (analytics.totalExpense /
-                        analytics.totalIncome) *
-                      100
-                    ).toFixed(1)}%`
-                  : "N/A"}
-              </strong>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
-              }}
-            >
-              <span>
-                Available Liquidity
-              </span>
-
-              <strong>
-                {compactMoney(
-                  fundPosition.total
+                {money(
+                  analytics.grossExpense
                 )}
-              </strong>
+              </div>
             </div>
 
             <div
               style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
+                marginBottom: 25,
               }}
             >
-              <span>
-                TDS Recorded
-              </span>
+              <div className="muted">
+                Total Net Payment
+              </div>
 
-              <strong>
-                {compactMoney(
+              <div
+                style={{
+                  fontSize: 28,
+                  fontWeight: 700,
+                }}
+              >
+                {money(
+                  analytics.netExpense
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="muted">
+                TDS Liability / Deduction
+              </div>
+
+              <div
+                style={{
+                  fontSize: 28,
+                  fontWeight: 700,
+                  color: "#8b5cf6",
+                }}
+              >
+                {money(
                   analytics.totalTds
                 )}
-              </strong>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ========================================================
-          SMART INSIGHTS
-      ========================================================= */}
+      {/* =====================================
+          MANAGEMENT INSIGHTS
+      ====================================== */}
 
       <div
         className="card"
@@ -2060,295 +1564,94 @@ export default function ReportsPage() {
           marginTop: 20,
         }}
       >
+        <h3>
+          ✨ Management Insights
+        </h3>
+
         <div
+          className="grid"
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 8,
+            marginTop: 20,
           }}
         >
           <div
             style={{
-              fontSize: 24,
+              padding: 18,
+              borderRadius: 14,
+              background:
+                analytics.surplus >= 0
+                  ? "rgba(22,163,74,.08)"
+                  : "rgba(220,38,38,.08)",
             }}
           >
-            🤖
-          </div>
+            <strong>
+              Surplus Performance
+            </strong>
 
-          <div>
-            <h3
-              style={{
-                margin: 0,
-              }}
-            >
-              GPCC Smart Financial Insights
-            </h3>
-
-            <p
-              className="muted"
-              style={{
-                marginTop: 5,
-              }}
-            >
-              Automated insights generated
-              from your financial records
-            </p>
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 15,
-            marginTop: 22,
-          }}
-        >
-          {insights.map(
-            (insight, index) => (
-              <div
-                key={`${insight.title}-${index}`}
-                style={{
-                  border:
-                    "1px solid var(--border, #ddd)",
-                  borderRadius: 12,
-                  padding: 18,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 24,
-                    marginBottom: 10,
-                  }}
-                >
-                  {insight.icon}
-                </div>
-
-                <strong>
-                  {insight.title}
-                </strong>
-
-                <p
-                  className="muted"
-                  style={{
-                    marginTop: 8,
-                    lineHeight: 1.6,
-                    fontSize: 13,
-                  }}
-                >
-                  {insight.description}
-                </p>
-              </div>
-            )
-          )}
-        </div>
-      </div>
-
-      {/* ========================================================
-          TOP EXPENSES + CONTROL SUMMARY
-      ========================================================= */}
-
-      <div
-        className="grid"
-        style={{
-          marginTop: 20,
-        }}
-      >
-        {/* TOP EXPENSES */}
-
-        <div className="card">
-          <h3>
-            🔥 Top 5 Expenses
-          </h3>
-
-          <p
-            className="muted"
-            style={{
-              marginBottom: 20,
-            }}
-          >
-            Largest expenditure
-            transactions in FY{" "}
-            {financialYear}
-          </p>
-
-          {topExpenses.length === 0 ? (
             <p className="muted">
-              No expense transactions
-              available.
+              GPCC currently has a{" "}
+              {analytics.surplus >= 0
+                ? "positive"
+                : "negative"}{" "}
+              financial surplus of{" "}
+              {money(
+                Math.abs(
+                  analytics.surplus
+                )
+              )}
+              .
             </p>
-          ) : (
-            <div className="tableWrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>
-                      Description
-                    </th>
-
-                    <th>
-                      Category
-                    </th>
-
-                    <th
-                      style={{
-                        textAlign:
-                          "right",
-                      }}
-                    >
-                      Amount
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {topExpenses.map(
-                    (row, index) => (
-                      <tr key={row.id}>
-                        <td>
-                          {row.description ||
-                            row.vendor_name ||
-                            `Expense ${
-                              index + 1
-                            }`}
-                        </td>
-
-                        <td>
-                          {row.category ||
-                            row.expense_category ||
-                            "Uncategorised"}
-                        </td>
-
-                        <td
-                          style={{
-                            textAlign:
-                              "right",
-                            fontWeight: 600,
-                          }}
-                        >
-                          {money(
-                            getNumber(
-                              row.gross_amount
-                            )
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* CONTROL SUMMARY */}
-
-        <div className="card">
-          <h3>
-            🛡 Financial Control Summary
-          </h3>
-
-          <p
-            className="muted"
-            style={{
-              marginBottom: 20,
-            }}
-          >
-            Key financial governance
-            indicators
-          </p>
+          </div>
 
           <div
             style={{
-              display: "flex",
-              flexDirection:
-                "column",
-              gap: 15,
+              padding: 18,
+              borderRadius: 14,
+              background:
+                "rgba(14,165,233,.08)",
             }}
           >
-            <div
-              style={{
-                padding: 16,
-                borderRadius: 10,
-                border:
-                  "1px solid var(--border, #ddd)",
-              }}
-            >
-              <div className="muted">
-                Gross Expenditure
-              </div>
+            <strong>
+              Fund Availability
+            </strong>
 
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  marginTop: 6,
-                }}
-              >
-                {money(
-                  analytics.totalExpense
-                )}
-              </div>
-            </div>
+            <p className="muted">
+              Total immediately available
+              funds are{" "}
+              {money(
+                analytics.availableFunds
+              )}
+              .
+            </p>
+          </div>
 
-            <div
-              style={{
-                padding: 16,
-                borderRadius: 10,
-                border:
-                  "1px solid var(--border, #ddd)",
-              }}
-            >
-              <div className="muted">
-                Actual Payment Outflow
-              </div>
+          <div
+            style={{
+              padding: 18,
+              borderRadius: 14,
+              background:
+                "rgba(139,92,246,.08)",
+            }}
+          >
+            <strong>
+              Expense Control
+            </strong>
 
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  marginTop: 6,
-                }}
-              >
-                {money(
-                  analytics.totalActualOutflow
-                )}
-              </div>
-            </div>
-
-            <div
-              style={{
-                padding: 16,
-                borderRadius: 10,
-                border:
-                  "1px solid var(--border, #ddd)",
-              }}
-            >
-              <div className="muted">
-                Total TDS
-              </div>
-
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  marginTop: 6,
-                }}
-              >
-                {money(
-                  analytics.totalTds
-                )}
-              </div>
-            </div>
+            <p className="muted">
+              Expenses represent{" "}
+              {analytics.expenseRatio.toFixed(
+                1
+              )}
+              % of total income for the
+              selected reporting period.
+            </p>
           </div>
         </div>
       </div>
 
-      {/* ========================================================
-          FOOTER / ANALYTICS NOTE
-      ========================================================= */}
+      {/* =====================================
+          DATA SUMMARY
+      ====================================== */}
 
       <div
         className="card"
@@ -2358,34 +1661,63 @@ export default function ReportsPage() {
         }}
       >
         <h3>
-          ℹ️ Analytics Methodology
+          Data Summary
         </h3>
 
-        <p className="muted">
-          Income analytics include only
-          transactions with status
-          <strong> Cleared</strong>. Expense
-          analytics include only transactions
-          with status <strong>Paid</strong>.
-        </p>
+        <div className="tableWrap">
+          <table className="table">
+            <tbody>
+              <tr>
+                <td>
+                  Cleared Income Transactions
+                </td>
 
-        <p className="muted">
-          Current available funds are
-          calculated independently of the
-          selected financial year using the
-          active opening balances, all
-          applicable cleared income, paid
-          expenses, internal fund transfers
-          and account-specific adjustments.
-        </p>
+                <td>
+                  {number(
+                    filteredIncome.length
+                  )}
+                </td>
+              </tr>
 
-        <p className="muted">
-          Internal transfers between Bank and
-          Petty Cash do not change total GPCC
-          funds; they only redistribute
-          liquidity between accounts.
-        </p>
+              <tr>
+                <td>
+                  Paid Expense Transactions
+                </td>
+
+                <td>
+                  {number(
+                    filteredExpenses.length
+                  )}
+                </td>
+              </tr>
+
+              <tr>
+                <td>
+                  Fund Transfer Transactions
+                </td>
+
+                <td>
+                  {number(
+                    transferData.length
+                  )}
+                </td>
+              </tr>
+
+              <tr>
+                <th>
+                  Total Available Funds
+                </th>
+
+                <th>
+                  {money(
+                    analytics.availableFunds
+                  )}
+                </th>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
