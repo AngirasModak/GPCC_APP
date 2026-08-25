@@ -1,1450 +1,1347 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { supabase } from "../../lib/supabase";
 
 /* =========================================================
    TYPES
 ========================================================= */
 
-type MonthlyPoint = {
+type IncomeRow = {
+  id?: string;
+  amount?: number | string | null;
+  mode?: string | null;
+  status?: string | null;
+  date?: string | null;
+  income_date?: string | null;
+  created_at?: string | null;
+  category?: string | null;
+  source?: string | null;
+  description?: string | null;
+};
+
+type ExpenseRow = {
+  id?: string;
+  gross_amount?: number | string | null;
+  net_amount?: number | string | null;
+  tds_amount?: number | string | null;
+  tds_rate?: number | string | null;
+  payment_mode?: string | null;
+  status?: string | null;
+  expense_date?: string | null;
+  date?: string | null;
+  created_at?: string | null;
+  category?: string | null;
+  expense_category?: string | null;
+  description?: string | null;
+  vendor?: string | null;
+};
+
+type TransferRow = {
+  id?: string;
+  amount?: number | string | null;
+  type?: string | null;
+  direction?: string | null;
+  date?: string | null;
+  created_at?: string | null;
+};
+
+type BankAccount = {
+  id?: string;
+  account_name?: string | null;
+  opening_balance?: number | string | null;
+  opening_balance_date?: string | null;
+  is_active?: boolean | null;
+};
+
+type PettyCashAccount = {
+  id?: string;
+  account_name?: string | null;
+  opening_balance?: number | string | null;
+  opening_balance_date?: string | null;
+  is_active?: boolean | null;
+};
+
+type MonthlyTrend = {
   month: string;
   income: number;
   expense: number;
-  net: number;
+  surplus: number;
+  cumulative: number;
 };
 
-type CategoryPoint = {
+type CategoryData = {
   name: string;
   value: number;
   percentage: number;
 };
 
-type PaymentPoint = {
+type PaymentModeData = {
   name: string;
   value: number;
 };
 
-type AlertItem = {
+type NotificationItem = {
   id: string;
-  level: "success" | "info" | "warning" | "danger";
+  type: "critical" | "warning" | "success" | "info";
+  title: string;
+  message: string;
+};
+
+type Recommendation = {
+  id: string;
+  priority: "High" | "Medium" | "Low";
   title: string;
   description: string;
 };
 
 type DashboardSummary = {
-  /* Core financial metrics */
   totalIncome: number;
   totalExpense: number;
+  netSurplus: number;
+  availableFunds: number;
   totalTds: number;
-  totalNetExpense: number;
-  netPosition: number;
 
-  /* Current funds */
   bankBalance: number;
   pettyCashBalance: number;
-  totalAvailableFunds: number;
 
-  /* Income channels */
   bankIncome: number;
   cashIncome: number;
 
-  /* Expense channels */
   bankExpense: number;
   pettyCashExpense: number;
 
-  /* Transfers */
   bankToPettyCash: number;
   pettyCashToBank: number;
 
-  /* Adjustments */
-  bankAdjustmentCredit: number;
-  bankAdjustmentDebit: number;
-  cashAdjustmentCredit: number;
-  cashAdjustmentDebit: number;
-
-  /* Counts */
-  incomeCount: number;
-  expenseCount: number;
-  transferCount: number;
-
-  /* Analysis collections */
-  monthlyTrend: MonthlyPoint[];
-  expenseCategories: CategoryPoint[];
-  incomeModes: PaymentPoint[];
-  expenseModes: PaymentPoint[];
-  alerts: AlertItem[];
-
-  /* Analytics */
   averageMonthlyIncome: number;
   averageMonthlyExpense: number;
-  savingsRate: number;
-  burnRate: number;
-  projectedMonthEndBalance: number;
-  largestExpenseCategory: string;
-  largestExpenseCategoryAmount: number;
+  projectedMonthlySurplus: number;
+
+  runwayMonths: number;
+  financialHealthScore: number;
+
+  monthlyTrend: MonthlyTrend[];
+
+  expenseCategories: CategoryData[];
+
+  paymentModes: PaymentModeData[];
+
+  notifications: NotificationItem[];
+
+  recommendations: Recommendation[];
 };
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-const money = (n: number) =>
+const money = (value: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(Number(n || 0));
+  }).format(Number(value || 0));
 
-const compactMoney = (n: number) =>
+const compactMoney = (value: number) =>
   new Intl.NumberFormat("en-IN", {
     notation: "compact",
     maximumFractionDigits: 1,
-  }).format(Number(n || 0));
+  }).format(Number(value || 0));
 
-const number = (n: number) =>
-  new Intl.NumberFormat("en-IN", {
-    maximumFractionDigits: 0,
-  }).format(Number(n || 0));
+const number = (value: unknown) => Number(value || 0);
 
-const percent = (n: number) =>
-  `${Number(n || 0).toFixed(1)}%`;
-
-const getMonthKey = (value: any) => {
-  if (!value) return "Unknown";
+const safeDate = (value?: string | null) => {
+  if (!value) return null;
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return "Unknown";
-  }
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date;
+};
+
+const getMonthKey = (value?: string | null) => {
+  const date = safeDate(value);
+
+  if (!date) return null;
 
   return `${date.getFullYear()}-${String(
     date.getMonth() + 1
   ).padStart(2, "0")}`;
 };
 
-const getMonthLabel = (key: string) => {
-  if (key === "Unknown") return key;
+const getMonthLabel = (monthKey: string) => {
+  const [year, month] = monthKey.split("-");
 
-  const [year, month] = key.split("-");
-
-  const date = new Date(
-    Number(year),
-    Number(month) - 1,
-    1
-  );
-
-  return date.toLocaleDateString("en-IN", {
+  return new Intl.DateTimeFormat("en-IN", {
     month: "short",
-    year: "2-digit",
-  });
+    year: "numeric",
+  }).format(new Date(Number(year), Number(month) - 1, 1));
 };
 
-const getNetPayment = (row: any) => {
+const normalizeText = (value?: string | null) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
+
+const getIncomeDate = (row: IncomeRow) =>
+  row.income_date ||
+  row.date ||
+  row.created_at ||
+  null;
+
+const getExpenseDate = (row: ExpenseRow) =>
+  row.expense_date ||
+  row.date ||
+  row.created_at ||
+  null;
+
+const getNetPayment = (row: ExpenseRow) => {
   if (
     row.net_amount !== null &&
     row.net_amount !== undefined &&
     row.net_amount !== ""
   ) {
-    return Number(row.net_amount || 0);
+    return number(row.net_amount);
   }
 
-  const gross = Number(row.gross_amount || 0);
+  const gross = number(row.gross_amount);
 
-  const tds =
+  let tds = 0;
+
+  if (
     row.tds_amount !== null &&
-    row.tds_amount !== undefined
-      ? Number(row.tds_amount || 0)
-      : gross * (Number(row.tds_rate || 0) / 100);
+    row.tds_amount !== undefined &&
+    row.tds_amount !== ""
+  ) {
+    tds = number(row.tds_amount);
+  } else {
+    tds =
+      gross *
+      (number(row.tds_rate) / 100);
+  }
 
   return gross - tds;
 };
 
-const normalize = (value: any) =>
-  String(value || "")
-    .trim()
-    .toLowerCase();
-
-const getCategory = (row: any) => {
-  return (
-    row.category ||
-    row.expense_category ||
-    row.category_name ||
-    row.expense_type ||
-    "Uncategorised"
-  );
-};
-
 /* =========================================================
-   SIMPLE SVG LINE CHART
+   MAIN COMPONENT
 ========================================================= */
 
-function TrendChart({
-  data,
-}: {
-  data: MonthlyPoint[];
-}) {
-  const width = 900;
-  const height = 280;
-  const padding = 35;
-
-  const values = data.flatMap((x) => [
-    x.income,
-    x.expense,
-  ]);
-
-  const maxValue = Math.max(
-    ...values,
-    1
-  );
-
-  const createPoints = (
-    accessor: (item: MonthlyPoint) => number
-  ) => {
-    if (data.length === 0) return "";
-
-    return data
-      .map((item, index) => {
-        const x =
-          padding +
-          (index /
-            Math.max(data.length - 1, 1)) *
-            (width - padding * 2);
-
-        const y =
-          height -
-          padding -
-          (accessor(item) / maxValue) *
-            (height - padding * 2);
-
-        return `${x},${y}`;
-      })
-      .join(" ");
-  };
-
-  const incomePoints = createPoints(
-    (x) => x.income
-  );
-
-  const expensePoints = createPoints(
-    (x) => x.expense
-  );
-
-  if (data.length === 0) {
-    return (
-      <div className="emptyChart">
-        No monthly financial data available.
-      </div>
-    );
-  }
-
-  return (
-    <div className="chartContainer">
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        width="100%"
-        role="img"
-      >
-        {[0, 1, 2, 3, 4].map((line) => {
-          const y =
-            padding +
-            line *
-              ((height - padding * 2) / 4);
-
-          return (
-            <line
-              key={line}
-              x1={padding}
-              y1={y}
-              x2={width - padding}
-              y2={y}
-              stroke="currentColor"
-              opacity="0.08"
-            />
-          );
-        })}
-
-        <polyline
-          fill="none"
-          stroke="#22c55e"
-          strokeWidth="4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={incomePoints}
-        />
-
-        <polyline
-          fill="none"
-          stroke="#ef4444"
-          strokeWidth="4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={expensePoints}
-        />
-
-        {data.map((item, index) => {
-          const x =
-            padding +
-            (index /
-              Math.max(data.length - 1, 1)) *
-              (width - padding * 2);
-
-          return (
-            <text
-              key={item.month}
-              x={x}
-              y={height - 8}
-              textAnchor="middle"
-              fontSize="11"
-              fill="currentColor"
-              opacity="0.65"
-            >
-              {getMonthLabel(item.month)}
-            </text>
-          );
-        })}
-      </svg>
-
-      <div className="chartLegend">
-        <span>
-          <i className="legendDot incomeDot" />
-          Income
-        </span>
-
-        <span>
-          <i className="legendDot expenseDot" />
-          Expense
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   BAR CHART
-========================================================= */
-
-function CategoryChart({
-  data,
-}: {
-  data: CategoryPoint[];
-}) {
-  const maxValue = Math.max(
-    ...data.map((x) => x.value),
-    1
-  );
-
-  if (!data.length) {
-    return (
-      <div className="emptyChart">
-        No expense category data available.
-      </div>
-    );
-  }
-
-  return (
-    <div className="categoryChart">
-      {data.slice(0, 8).map((item) => {
-        const width =
-          (item.value / maxValue) * 100;
-
-        return (
-          <div
-            className="barRow"
-            key={item.name}
-          >
-            <div className="barLabel">
-              <span>{item.name}</span>
-
-              <strong>
-                {money(item.value)}
-              </strong>
-            </div>
-
-            <div className="barTrack">
-              <div
-                className="barFill"
-                style={{
-                  width: `${Math.max(
-                    width,
-                    2
-                  )}%`,
-                }}
-              />
-            </div>
-
-            <div className="barMeta">
-              {percent(item.percentage)}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* =========================================================
-   PAYMENT DISTRIBUTION
-========================================================= */
-
-function DistributionChart({
-  title,
-  data,
-}: {
-  title: string;
-  data: PaymentPoint[];
-}) {
-  const total = data.reduce(
-    (sum, item) =>
-      sum + item.value,
-    0
-  );
-
-  return (
-    <div className="distributionCard">
-      <h4>{title}</h4>
-
-      {data.length === 0 ? (
-        <p className="muted">
-          No data available.
-        </p>
-      ) : (
-        data.map((item) => {
-          const ratio =
-            total > 0
-              ? (item.value / total) * 100
-              : 0;
-
-          return (
-            <div
-              className="distributionItem"
-              key={item.name}
-            >
-              <div className="distributionTop">
-                <span>{item.name}</span>
-
-                <strong>
-                  {money(item.value)}
-                </strong>
-              </div>
-
-              <div className="distributionTrack">
-                <div
-                  className="distributionFill"
-                  style={{
-                    width: `${Math.max(
-                      ratio,
-                      2
-                    )}%`,
-                  }}
-                />
-              </div>
-
-              <small>
-                {percent(ratio)} of total
-              </small>
-            </div>
-          );
-        })
-      )}
-    </div>
-  );
-}
-
-/* =========================================================
-   MAIN PAGE
-========================================================= */
-
-export default function ReportsPage() {
-  const [loading, setLoading] =
-    useState(true);
-
-  const [message, setMessage] =
-    useState("");
-
-  const [lastUpdated, setLastUpdated] =
-    useState<Date | null>(null);
+export default function ReportsAnalyticsPage() {
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [message, setMessage] = useState("");
 
   const [summary, setSummary] =
-    useState<DashboardSummary>({
-      totalIncome: 0,
-      totalExpense: 0,
-      totalTds: 0,
-      totalNetExpense: 0,
-      netPosition: 0,
+    useState<DashboardSummary | null>(null);
 
-      bankBalance: 0,
-      pettyCashBalance: 0,
-      totalAvailableFunds: 0,
+  /* =======================================================
+     LOAD REPORT DATA
+  ======================================================= */
 
-      bankIncome: 0,
-      cashIncome: 0,
+  const loadAnalytics = useCallback(
+    async (showRefresh = false) => {
+      try {
+        if (showRefresh) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
 
-      bankExpense: 0,
-      pettyCashExpense: 0,
+        setMessage("");
 
-      bankToPettyCash: 0,
-      pettyCashToBank: 0,
+        /*
+         * ---------------------------------------------------
+         * LOAD DATA
+         * ---------------------------------------------------
+         */
 
-      bankAdjustmentCredit: 0,
-      bankAdjustmentDebit: 0,
-      cashAdjustmentCredit: 0,
-      cashAdjustmentDebit: 0,
+        const [
+          incomeResult,
+          expenseResult,
+          transferResult,
+          bankResult,
+          pettyCashResult,
+        ] = await Promise.all([
+          supabase
+            .from("income")
+            .select("*")
+            .is("deleted_at", null)
+            .eq("status", "Cleared"),
 
-      incomeCount: 0,
-      expenseCount: 0,
-      transferCount: 0,
+          supabase
+            .from("expenses")
+            .select("*")
+            .is("deleted_at", null)
+            .eq("status", "Paid"),
 
-      monthlyTrend: [],
-      expenseCategories: [],
-      incomeModes: [],
-      expenseModes: [],
-      alerts: [],
+          supabase
+            .from("fund_transfers")
+            .select("*")
+            .is("deleted_at", null),
 
-      averageMonthlyIncome: 0,
-      averageMonthlyExpense: 0,
-      savingsRate: 0,
-      burnRate: 0,
-      projectedMonthEndBalance: 0,
-      largestExpenseCategory: "N/A",
-      largestExpenseCategoryAmount: 0,
-    });
+          supabase
+            .from("bank_accounts")
+            .select("*")
+            .eq("is_active", true)
+            .maybeSingle(),
 
-  /* =====================================================
-     LOAD ANALYTICS
-  ===================================================== */
+          supabase
+            .from("petty_cash_accounts")
+            .select("*")
+            .eq("is_active", true)
+            .maybeSingle(),
+        ]);
 
-  const loadReports = async () => {
-    setLoading(true);
-    setMessage("");
-
-    try {
-      const [
-        incomeResponse,
-        expenseResponse,
-        transferResponse,
-        bankResponse,
-        pettyCashResponse,
-      ] = await Promise.all([
-        supabase
-          .from("income")
-          .select("*")
-          .is("deleted_at", null),
-
-        supabase
-          .from("expenses")
-          .select("*")
-          .is("deleted_at", null),
-
-        supabase
-          .from("fund_transfers")
-          .select("*")
-          .is("deleted_at", null),
-
-        supabase
-          .from("bank_accounts")
-          .select("*")
-          .eq("is_active", true)
-          .maybeSingle(),
-
-        supabase
-          .from("petty_cash_accounts")
-          .select("*")
-          .eq("is_active", true)
-          .maybeSingle(),
-      ]);
-
-      if (incomeResponse.error) {
-        throw new Error(
-          incomeResponse.error.message
-        );
-      }
-
-      if (expenseResponse.error) {
-        throw new Error(
-          expenseResponse.error.message
-        );
-      }
-
-      if (transferResponse.error) {
-        throw new Error(
-          transferResponse.error.message
-        );
-      }
-
-      const allIncome =
-        incomeResponse.data || [];
-
-      const allExpenses =
-        expenseResponse.data || [];
-
-      const transfers =
-        transferResponse.data || [];
-
-      const bankAccount =
-        bankResponse.data;
-
-      const pettyCashAccount =
-        pettyCashResponse.data;
-
-      /*
-       * -----------------------------------------------
-       * FILTER FINANCIAL TRANSACTIONS
-       * -----------------------------------------------
-       */
-
-      const incomes = allIncome.filter(
-        (row: any) =>
-          !row.status ||
-          normalize(row.status) ===
-            "cleared"
-      );
-
-      const expenses =
-        allExpenses.filter(
-          (row: any) =>
-            !row.status ||
-            normalize(row.status) ===
-              "paid"
-        );
-
-      /*
-       * -----------------------------------------------
-       * INCOME
-       * -----------------------------------------------
-       */
-
-      const totalIncome =
-        incomes.reduce(
-          (sum: number, row: any) =>
-            sum +
-            Number(row.amount || 0),
-          0
-        );
-
-      const bankIncome =
-        incomes
-          .filter((row: any) => {
-            const mode =
-              normalize(row.mode);
-
-            return (
-              mode === "bank transfer" ||
-              mode === "online" ||
-              mode === "upi" ||
-              mode === "cheque"
-            );
-          })
-          .reduce(
-            (sum: number, row: any) =>
-              sum +
-              Number(row.amount || 0),
-            0
+        if (incomeResult.error) {
+          throw new Error(
+            incomeResult.error.message
           );
+        }
 
-      const cashIncome =
-        incomes
-          .filter(
-            (row: any) =>
-              normalize(row.mode) ===
-              "cash"
-          )
-          .reduce(
-            (sum: number, row: any) =>
-              sum +
-              Number(row.amount || 0),
-            0
+        if (expenseResult.error) {
+          throw new Error(
+            expenseResult.error.message
           );
+        }
 
-      /*
-       * -----------------------------------------------
-       * EXPENSE
-       * -----------------------------------------------
-       */
+        if (transferResult.error) {
+          throw new Error(
+            transferResult.error.message
+          );
+        }
 
-      const totalExpense =
-        expenses.reduce(
-          (sum: number, row: any) =>
-            sum +
-            Number(
-              row.gross_amount ||
-                row.amount ||
-                0
-            ),
+        if (bankResult.error) {
+          throw new Error(
+            bankResult.error.message
+          );
+        }
+
+        if (pettyCashResult.error) {
+          throw new Error(
+            pettyCashResult.error.message
+          );
+        }
+
+        const incomes =
+          (incomeResult.data || []) as IncomeRow[];
+
+        const expenses =
+          (expenseResult.data || []) as ExpenseRow[];
+
+        const transfers =
+          (transferResult.data || []) as TransferRow[];
+
+        const bankAccount =
+          bankResult.data as BankAccount | null;
+
+        const pettyCashAccount =
+          pettyCashResult.data as PettyCashAccount | null;
+
+        /*
+         * ---------------------------------------------------
+         * DESCRIPTIVE ANALYSIS
+         * WHAT HAPPENED?
+         * ---------------------------------------------------
+         */
+
+        const totalIncome = incomes.reduce(
+          (sum, row) =>
+            sum + number(row.amount),
           0
         );
 
-      const totalNetExpense =
-        expenses.reduce(
-          (sum: number, row: any) =>
-            sum +
-            getNetPayment(row),
+        const totalExpense = expenses.reduce(
+          (sum, row) =>
+            sum + number(row.gross_amount),
           0
         );
 
-      const totalTds =
-        expenses.reduce(
-          (sum: number, row: any) => {
+        const totalTds = expenses.reduce(
+          (sum, row) => {
             if (
-              row.tds_amount !==
-                null &&
-              row.tds_amount !==
-                undefined
+              row.tds_amount !== null &&
+              row.tds_amount !== undefined &&
+              row.tds_amount !== ""
             ) {
               return (
                 sum +
-                Number(
-                  row.tds_amount ||
-                    0
-                )
+                number(row.tds_amount)
               );
             }
 
-            const gross =
-              Number(
-                row.gross_amount ||
-                  0
-              );
-
-            const rate =
-              Number(
-                row.tds_rate ||
-                  0
-              );
-
             return (
               sum +
-              gross * (rate / 100)
+              number(row.gross_amount) *
+                (number(row.tds_rate) / 100)
             );
           },
           0
         );
 
-      const pettyCashExpense =
-        expenses
-          .filter(
-            (row: any) =>
-              normalize(
-                row.payment_mode
-              ) ===
-              "petty cash"
-          )
-          .reduce(
-            (sum: number, row: any) =>
-              sum +
-              getNetPayment(row),
+        const totalNetExpense =
+          expenses.reduce(
+            (sum, row) =>
+              sum + getNetPayment(row),
             0
           );
 
-      const bankExpense =
-        expenses
-          .filter((row: any) => {
-            const mode = normalize(
+        const netSurplus =
+          totalIncome - totalExpense;
+
+        /*
+         * ---------------------------------------------------
+         * BANK VS CASH INCOME
+         * ---------------------------------------------------
+         */
+
+        const bankIncome = incomes
+          .filter((row) => {
+            const mode =
+              normalizeText(row.mode);
+
+            return [
+              "cheque",
+              "online",
+              "bank transfer",
+              "upi",
+            ].includes(mode);
+          })
+          .reduce(
+            (sum, row) =>
+              sum + number(row.amount),
+            0
+          );
+
+        const cashIncome = incomes
+          .filter(
+            (row) =>
+              normalizeText(row.mode) ===
+              "cash"
+          )
+          .reduce(
+            (sum, row) =>
+              sum + number(row.amount),
+            0
+          );
+
+        /*
+         * ---------------------------------------------------
+         * BANK VS PETTY CASH EXPENSE
+         * ---------------------------------------------------
+         */
+
+        const pettyCashExpense =
+          expenses
+            .filter(
+              (row) =>
+                normalizeText(
+                  row.payment_mode
+                ) === "petty cash"
+            )
+            .reduce(
+              (sum, row) =>
+                sum + getNetPayment(row),
+              0
+            );
+
+        const bankExpense = expenses
+          .filter((row) => {
+            const mode = normalizeText(
               row.payment_mode
             );
 
-            return (
-              mode === "bank transfer" ||
-              mode === "online" ||
-              mode === "upi" ||
-              mode === "cheque"
-            );
+            return [
+              "bank transfer",
+              "cheque",
+              "online",
+              "upi",
+            ].includes(mode);
           })
           .reduce(
-            (sum: number, row: any) =>
-              sum +
-              getNetPayment(row),
+            (sum, row) =>
+              sum + getNetPayment(row),
             0
           );
 
-      /*
-       * -----------------------------------------------
-       * FUND TRANSFERS
-       * IMPORTANT:
-       * No "status" column is used here.
-       * -----------------------------------------------
-       */
+        /*
+         * ---------------------------------------------------
+         * FUND TRANSFERS
+         * ---------------------------------------------------
+         */
 
-      const bankToPettyCash =
-        transfers
-          .filter((row: any) => {
-            const type = String(
-              row.type || ""
-            ).trim();
+        const bankToPettyCash =
+          transfers
+            .filter((row) => {
+              const type = String(
+                row.type || ""
+              ).trim();
 
-            return (
-              type ===
-                "Bank Withdrawal" ||
-              type === "Withdrawal"
+              return (
+                type ===
+                  "Bank Withdrawal" ||
+                type === "Withdrawal"
+              );
+            })
+            .reduce(
+              (sum, row) =>
+                sum + number(row.amount),
+              0
             );
-          })
-          .reduce(
-            (sum: number, row: any) =>
-              sum +
-              Number(row.amount || 0),
-            0
-          );
 
-      const pettyCashToBank =
-        transfers
-          .filter((row: any) => {
-            const type = String(
-              row.type || ""
-            ).trim();
+        const pettyCashToBank =
+          transfers
+            .filter((row) => {
+              const type = String(
+                row.type || ""
+              ).trim();
 
-            return (
-              type ===
-                "Petty Cash to Bank" ||
-              type ===
-                "Cash Deposit" ||
-              type === "Deposit" ||
-              type ===
-                "Petty Cash Deposit" ||
-              type ===
-                "Return to Bank"
+              return [
+                "Petty Cash to Bank",
+                "Cash Deposit",
+                "Deposit",
+                "Petty Cash Deposit",
+                "Return to Bank",
+              ].includes(type);
+            })
+            .reduce(
+              (sum, row) =>
+                sum + number(row.amount),
+              0
             );
-          })
-          .reduce(
-            (sum: number, row: any) =>
-              sum +
-              Number(row.amount || 0),
-            0
-          );
 
-      const bankAdjustmentCredit =
-        transfers
-          .filter(
-            (row: any) =>
-              row.type ===
-                "Bank Adjustment" &&
-              row.direction ===
-                "IN"
-          )
-          .reduce(
-            (sum: number, row: any) =>
-              sum +
-              Number(row.amount || 0),
-            0
-          );
+        /*
+         * ---------------------------------------------------
+         * BANK ADJUSTMENTS
+         * ---------------------------------------------------
+         */
 
-      const bankAdjustmentDebit =
-        transfers
-          .filter(
-            (row: any) =>
-              row.type ===
-                "Bank Adjustment" &&
-              row.direction ===
-                "OUT"
-          )
-          .reduce(
-            (sum: number, row: any) =>
-              sum +
-              Number(row.amount || 0),
-            0
-          );
-
-      const cashAdjustmentCredit =
-        transfers
-          .filter(
-            (row: any) =>
-              (
+        const bankAdjustmentCredit =
+          transfers
+            .filter(
+              (row) =>
                 row.type ===
-                  "Cash Adjustment" ||
-                row.type ===
-                  "Cash Adjustment +"
-              ) &&
-              row.direction ===
-                "IN"
-          )
-          .reduce(
-            (sum: number, row: any) =>
-              sum +
-              Number(row.amount || 0),
-            0
-          );
-
-      const cashAdjustmentDebit =
-        transfers
-          .filter(
-            (row: any) =>
-              (
-                row.type ===
-                  "Cash Adjustment" ||
-                row.type ===
-                  "Cash Adjustment -"
-              ) &&
-              row.direction ===
-                "OUT"
-          )
-          .reduce(
-            (sum: number, row: any) =>
-              sum +
-              Number(row.amount || 0),
-            0
-          );
-
-      /*
-       * -----------------------------------------------
-       * CURRENT FINANCIAL POSITION
-       * -----------------------------------------------
-       */
-
-      const bankBalance =
-        Number(
-          bankAccount?.opening_balance ||
-            0
-        ) +
-        bankIncome -
-        bankExpense -
-        bankToPettyCash +
-        pettyCashToBank +
-        bankAdjustmentCredit -
-        bankAdjustmentDebit;
-
-      const pettyCashBalance =
-        Number(
-          pettyCashAccount?.opening_balance ||
-            0
-        ) +
-        cashIncome +
-        bankToPettyCash -
-        pettyCashExpense -
-        pettyCashToBank +
-        cashAdjustmentCredit -
-        cashAdjustmentDebit;
-
-      const totalAvailableFunds =
-        bankBalance +
-        pettyCashBalance;
-
-      /*
-       * -----------------------------------------------
-       * MONTHLY TREND
-       * -----------------------------------------------
-       */
-
-      const monthMap = new Map<
-        string,
-        MonthlyPoint
-      >();
-
-      incomes.forEach(
-        (row: any) => {
-          const key = getMonthKey(
-            row.income_date ||
-              row.date ||
-              row.created_at
-          );
-
-          if (
-            !monthMap.has(key)
-          ) {
-            monthMap.set(key, {
-              month: key,
-              income: 0,
-              expense: 0,
-              net: 0,
-            });
-          }
-
-          const item =
-            monthMap.get(key)!;
-
-          item.income += Number(
-            row.amount || 0
-          );
-        }
-      );
-
-      expenses.forEach(
-        (row: any) => {
-          const key = getMonthKey(
-            row.expense_date ||
-              row.date ||
-              row.created_at
-          );
-
-          if (
-            !monthMap.has(key)
-          ) {
-            monthMap.set(key, {
-              month: key,
-              income: 0,
-              expense: 0,
-              net: 0,
-            });
-          }
-
-          const item =
-            monthMap.get(key)!;
-
-          item.expense +=
-            getNetPayment(row);
-        }
-      );
-
-      const monthlyTrend =
-        Array.from(
-          monthMap.values()
-        )
-          .map((item) => ({
-            ...item,
-            net:
-              item.income -
-              item.expense,
-          }))
-          .sort((a, b) =>
-            a.month.localeCompare(
-              b.month
+                  "Bank Adjustment" &&
+                row.direction === "IN"
             )
-          )
-          .slice(-12);
+            .reduce(
+              (sum, row) =>
+                sum + number(row.amount),
+              0
+            );
 
-      /*
-       * -----------------------------------------------
-       * EXPENSE CATEGORY ANALYSIS
-       * -----------------------------------------------
-       */
+        const bankAdjustmentDebit =
+          transfers
+            .filter(
+              (row) =>
+                row.type ===
+                  "Bank Adjustment" &&
+                row.direction === "OUT"
+            )
+            .reduce(
+              (sum, row) =>
+                sum + number(row.amount),
+              0
+            );
 
-      const categoryMap =
-        new Map<string, number>();
+        /*
+         * ---------------------------------------------------
+         * CASH ADJUSTMENTS
+         * ---------------------------------------------------
+         */
 
-      expenses.forEach(
-        (row: any) => {
-          const category =
-            getCategory(row);
+        const cashAdjustmentCredit =
+          transfers
+            .filter((row) => {
+              const type = String(
+                row.type || ""
+              ).trim();
+
+              return (
+                [
+                  "Cash Adjustment",
+                  "Cash Adjustment +",
+                ].includes(type) &&
+                row.direction === "IN"
+              );
+            })
+            .reduce(
+              (sum, row) =>
+                sum + number(row.amount),
+              0
+            );
+
+        const cashAdjustmentDebit =
+          transfers
+            .filter((row) => {
+              const type = String(
+                row.type || ""
+              ).trim();
+
+              return (
+                [
+                  "Cash Adjustment",
+                  "Cash Adjustment -",
+                ].includes(type) &&
+                row.direction === "OUT"
+              );
+            })
+            .reduce(
+              (sum, row) =>
+                sum + number(row.amount),
+              0
+            );
+
+        /*
+         * ---------------------------------------------------
+         * CURRENT FINANCIAL POSITION
+         * ---------------------------------------------------
+         */
+
+        const bankBalance =
+          number(
+            bankAccount?.opening_balance
+          ) +
+          bankIncome -
+          bankExpense -
+          bankToPettyCash +
+          pettyCashToBank +
+          bankAdjustmentCredit -
+          bankAdjustmentDebit;
+
+        const pettyCashBalance =
+          number(
+            pettyCashAccount?.opening_balance
+          ) +
+          cashIncome +
+          bankToPettyCash -
+          pettyCashExpense -
+          pettyCashToBank +
+          cashAdjustmentCredit -
+          cashAdjustmentDebit;
+
+        const availableFunds =
+          bankBalance + pettyCashBalance;
+
+        /*
+         * ===================================================
+         * MONTHLY TREND ANALYSIS
+         * ===================================================
+         */
+
+        const monthlyMap = new Map<
+          string,
+          {
+            income: number;
+            expense: number;
+          }
+        >();
+
+        incomes.forEach((row) => {
+          const key = getMonthKey(
+            getIncomeDate(row)
+          );
+
+          if (!key) return;
 
           const current =
-            categoryMap.get(category) ||
-            0;
+            monthlyMap.get(key) || {
+              income: 0,
+              expense: 0,
+            };
+
+          current.income += number(
+            row.amount
+          );
+
+          monthlyMap.set(
+            key,
+            current
+          );
+        });
+
+        expenses.forEach((row) => {
+          const key = getMonthKey(
+            getExpenseDate(row)
+          );
+
+          if (!key) return;
+
+          const current =
+            monthlyMap.get(key) || {
+              income: 0,
+              expense: 0,
+            };
+
+          current.expense += number(
+            row.gross_amount
+          );
+
+          monthlyMap.set(
+            key,
+            current
+          );
+        });
+
+        const sortedMonths = Array.from(
+          monthlyMap.entries()
+        )
+          .sort(([a], [b]) =>
+            a.localeCompare(b)
+          )
+          .map(([key, value]) => ({
+            key,
+            ...value,
+          }));
+
+        let cumulative = 0;
+
+        const monthlyTrend: MonthlyTrend[] =
+          sortedMonths.map((item) => {
+            const surplus =
+              item.income - item.expense;
+
+            cumulative += surplus;
+
+            return {
+              month: getMonthLabel(
+                item.key
+              ),
+              income: item.income,
+              expense: item.expense,
+              surplus,
+              cumulative,
+            };
+          });
+
+        /*
+         * ===================================================
+         * EXPENSE CATEGORY ANALYSIS
+         * ===================================================
+         */
+
+        const categoryMap = new Map<
+          string,
+          number
+        >();
+
+        expenses.forEach((row) => {
+          const category =
+            String(
+              row.expense_category ||
+                row.category ||
+                "Uncategorized"
+            ).trim() ||
+            "Uncategorized";
 
           categoryMap.set(
             category,
-            current +
-              getNetPayment(row)
+            number(
+              categoryMap.get(category)
+            ) +
+              number(row.gross_amount)
           );
-        }
-      );
+        });
 
-      const expenseCategories =
-        Array.from(
-          categoryMap.entries()
-        )
-          .map(([name, value]) => ({
-            name,
-            value,
-            percentage:
-              totalNetExpense > 0
-                ? (value /
-                    totalNetExpense) *
-                  100
-                : 0,
-          }))
-          .sort(
-            (a, b) =>
-              b.value - a.value
-          );
+        const expenseCategories =
+          Array.from(
+            categoryMap.entries()
+          )
+            .map(([name, value]) => ({
+              name,
+              value,
+              percentage:
+                totalExpense > 0
+                  ? (value /
+                      totalExpense) *
+                    100
+                  : 0,
+            }))
+            .sort(
+              (a, b) =>
+                b.value - a.value
+            );
 
-      /*
-       * -----------------------------------------------
-       * INCOME PAYMENT MODE ANALYSIS
-       * -----------------------------------------------
-       */
+        /*
+         * ===================================================
+         * PAYMENT MODE ANALYSIS
+         * ===================================================
+         */
 
-      const incomeModeMap =
-        new Map<string, number>();
+        const paymentModeMap =
+          new Map<string, number>();
 
-      incomes.forEach(
-        (row: any) => {
+        expenses.forEach((row) => {
           const mode =
-            row.mode ||
+            String(
+              row.payment_mode ||
+                "Unspecified"
+            ).trim() ||
             "Unspecified";
 
-          incomeModeMap.set(
+          paymentModeMap.set(
             mode,
-            (incomeModeMap.get(
-              mode
-            ) || 0) +
-              Number(
-                row.amount || 0
+            number(
+              paymentModeMap.get(mode)
+            ) +
+              getNetPayment(row)
+          );
+        });
+
+        const paymentModes =
+          Array.from(
+            paymentModeMap.entries()
+          )
+            .map(([name, value]) => ({
+              name,
+              value,
+            }))
+            .sort(
+              (a, b) =>
+                b.value - a.value
+            );
+
+        /*
+         * ===================================================
+         * PREDICTIVE ANALYSIS
+         * ===================================================
+         */
+
+        const activeMonths =
+          Math.max(
+            monthlyTrend.length,
+            1
+          );
+
+        const averageMonthlyIncome =
+          totalIncome / activeMonths;
+
+        const averageMonthlyExpense =
+          totalExpense / activeMonths;
+
+        const projectedMonthlySurplus =
+          averageMonthlyIncome -
+          averageMonthlyExpense;
+
+        const runwayMonths =
+          averageMonthlyExpense > 0
+            ? availableFunds /
+              averageMonthlyExpense
+            : 0;
+
+        /*
+         * ===================================================
+         * FINANCIAL HEALTH SCORE
+         * ===================================================
+         */
+
+        let financialHealthScore = 100;
+
+        if (netSurplus < 0) {
+          financialHealthScore -= 25;
+        }
+
+        if (
+          totalIncome > 0 &&
+          totalExpense / totalIncome > 0.9
+        ) {
+          financialHealthScore -= 15;
+        }
+
+        if (runwayMonths < 1) {
+          financialHealthScore -= 20;
+        } else if (runwayMonths < 2) {
+          financialHealthScore -= 10;
+        }
+
+        if (
+          expenseCategories[0] &&
+          expenseCategories[0].percentage >
+            50
+        ) {
+          financialHealthScore -= 10;
+        }
+
+        if (availableFunds < 0) {
+          financialHealthScore = 10;
+        }
+
+        financialHealthScore =
+          Math.max(
+            0,
+            Math.min(
+              100,
+              Math.round(
+                financialHealthScore
               )
+            )
           );
+
+        /*
+         * ===================================================
+         * SMART NOTIFICATIONS
+         * ===================================================
+         */
+
+        const notifications: NotificationItem[] =
+          [];
+
+        if (totalIncome === 0) {
+          notifications.push({
+            id: "no-income",
+            type: "info",
+            title:
+              "No cleared income recorded",
+            message:
+              "There is currently no cleared income available for financial analysis.",
+          });
         }
-      );
 
-      const incomeModes =
-        Array.from(
-          incomeModeMap.entries()
-        )
-          .map(
-            ([name, value]) => ({
-              name,
-              value,
-            })
-          )
-          .sort(
-            (a, b) =>
-              b.value - a.value
-          );
-
-      /*
-       * -----------------------------------------------
-       * EXPENSE PAYMENT MODE ANALYSIS
-       * -----------------------------------------------
-       */
-
-      const expenseModeMap =
-        new Map<string, number>();
-
-      expenses.forEach(
-        (row: any) => {
-          const mode =
-            row.payment_mode ||
-            "Unspecified";
-
-          expenseModeMap.set(
-            mode,
-            (expenseModeMap.get(
-              mode
-            ) || 0) +
-              getNetPayment(row)
-          );
+        if (totalExpense > totalIncome) {
+          notifications.push({
+            id: "expense-exceeds-income",
+            type: "critical",
+            title:
+              "Expenses exceed income",
+            message: `Current expenditure exceeds cleared income by ${money(
+              totalExpense - totalIncome
+            )}.`,
+          });
+        } else if (
+          totalIncome > 0 &&
+          netSurplus > 0
+        ) {
+          notifications.push({
+            id: "positive-surplus",
+            type: "success",
+            title:
+              "Positive financial surplus",
+            message: `GPCC currently has a surplus of ${money(
+              netSurplus
+            )} based on cleared income and recorded expenses.`,
+          });
         }
-      );
 
-      const expenseModes =
-        Array.from(
-          expenseModeMap.entries()
-        )
-          .map(
-            ([name, value]) => ({
-              name,
-              value,
-            })
-          )
-          .sort(
-            (a, b) =>
-              b.value - a.value
-          );
+        if (
+          pettyCashBalance >= 0 &&
+          pettyCashBalance < 1000
+        ) {
+          notifications.push({
+            id: "low-petty-cash",
+            type: "warning",
+            title:
+              "Low petty cash position",
+            message: `Current petty cash is ${money(
+              pettyCashBalance
+            )}. Consider replenishment if upcoming cash expenses are expected.`,
+          });
+        }
 
-      /*
-       * -----------------------------------------------
-       * DESCRIPTIVE / DIAGNOSTIC / PREDICTIVE
-       * -----------------------------------------------
-       */
+        if (
+          expenseCategories.length > 0 &&
+          expenseCategories[0].percentage >
+            40
+        ) {
+          notifications.push({
+            id: "expense-concentration",
+            type: "warning",
+            title:
+              "High expense concentration",
+            message: `${expenseCategories[0].name} represents ${expenseCategories[0].percentage.toFixed(
+              1
+            )}% of total expenditure.`,
+          });
+        }
 
-      const activeMonths =
-        Math.max(
-          monthlyTrend.length,
-          1
+        if (
+          runwayMonths > 0 &&
+          runwayMonths < 1
+        ) {
+          notifications.push({
+            id: "low-runway",
+            type: "critical",
+            title:
+              "Financial runway is below one month",
+            message: `At the current average expenditure level, available funds may cover approximately ${runwayMonths.toFixed(
+              1
+            )} month(s).`,
+          });
+        } else if (
+          runwayMonths >= 3
+        ) {
+          notifications.push({
+            id: "healthy-runway",
+            type: "success",
+            title:
+              "Healthy financial runway",
+            message: `Current available funds represent approximately ${runwayMonths.toFixed(
+              1
+            )} months of average expenditure.`,
+          });
+        }
+
+        if (
+          monthlyTrend.length >= 2
+        ) {
+          const current =
+            monthlyTrend[
+              monthlyTrend.length - 1
+            ];
+
+          const previous =
+            monthlyTrend[
+              monthlyTrend.length - 2
+            ];
+
+          if (
+            previous.expense > 0 &&
+            current.expense >
+              previous.expense * 1.2
+          ) {
+            const growth =
+              ((current.expense -
+                previous.expense) /
+                previous.expense) *
+              100;
+
+            notifications.push({
+              id: "expense-growth",
+              type: "warning",
+              title:
+                "Sharp monthly expense increase",
+              message: `Expense increased by ${growth.toFixed(
+                1
+              )}% compared with the previous recorded month.`,
+            });
+          }
+        }
+
+        if (
+          notifications.length === 0
+        ) {
+          notifications.push({
+            id: "stable",
+            type: "info",
+            title:
+              "Financial position is stable",
+            message:
+              "No major financial risk indicators were identified from the currently available transaction data.",
+          });
+        }
+
+        /*
+         * ===================================================
+         * PRESCRIPTIVE ANALYSIS
+         * WHAT SHOULD BE DONE?
+         * ===================================================
+         */
+
+        const recommendations: Recommendation[] =
+          [];
+
+        if (netSurplus < 0) {
+          recommendations.push({
+            id: "reduce-expense",
+            priority: "High",
+            title:
+              "Control expenditure immediately",
+            description:
+              "Review non-essential expenses and prioritise mandatory commitments until expenditure is aligned with income.",
+          });
+        }
+
+        if (
+          expenseCategories[0] &&
+          expenseCategories[0].percentage >
+            40
+        ) {
+          recommendations.push({
+            id: "category-review",
+            priority: "High",
+            title: `Review ${expenseCategories[0].name}`,
+            description: `This category contributes ${expenseCategories[0].percentage.toFixed(
+              1
+            )}% of total expenditure and should be reviewed for optimisation opportunities.`,
+          });
+        }
+
+        if (
+          runwayMonths > 0 &&
+          runwayMonths < 2
+        ) {
+          recommendations.push({
+            id: "reserve",
+            priority: "High",
+            title:
+              "Strengthen the financial reserve",
+            description:
+              "Build a higher cash reserve through improved collection, controlled expenditure, or planned fund allocation.",
+          });
+        }
+
+        if (
+          pettyCashBalance < 1000
+        ) {
+          recommendations.push({
+            id: "petty-cash",
+            priority: "Medium",
+            title:
+              "Review petty cash requirement",
+            description:
+              "Evaluate upcoming cash requirements and replenish petty cash only according to approved operational needs.",
+          });
+        }
+
+        if (
+          totalIncome > 0 &&
+          totalExpense / totalIncome >
+            0.8
+        ) {
+          recommendations.push({
+            id: "margin",
+            priority: "Medium",
+            title:
+              "Improve operating surplus",
+            description:
+              "Target a lower expense-to-income ratio by monitoring high-value expense categories and improving income collection.",
+          });
+        }
+
+        if (
+          recommendations.length === 0
+        ) {
+          recommendations.push({
+            id: "maintain",
+            priority: "Low",
+            title:
+              "Maintain financial discipline",
+            description:
+              "Continue monitoring expenditure, maintain supporting documentation, and preserve the current financial control process.",
+          });
+        }
+
+        /*
+         * ===================================================
+         * UPDATE SUMMARY
+         * ===================================================
+         */
+
+        setSummary({
+          totalIncome,
+          totalExpense,
+          netSurplus,
+          availableFunds,
+          totalTds,
+
+          bankBalance,
+          pettyCashBalance,
+
+          bankIncome,
+          cashIncome,
+
+          bankExpense,
+          pettyCashExpense,
+
+          bankToPettyCash,
+          pettyCashToBank,
+
+          averageMonthlyIncome,
+          averageMonthlyExpense,
+          projectedMonthlySurplus,
+
+          runwayMonths,
+          financialHealthScore,
+
+          monthlyTrend,
+
+          expenseCategories,
+
+          paymentModes,
+
+          notifications,
+
+          recommendations,
+        });
+      } catch (error: any) {
+        setMessage(
+          error?.message ||
+            "Unable to load financial analytics."
         );
-
-      const averageMonthlyIncome =
-        totalIncome / activeMonths;
-
-      const averageMonthlyExpense =
-        totalNetExpense /
-        activeMonths;
-
-      const savingsRate =
-        totalIncome > 0
-          ? ((totalIncome -
-              totalNetExpense) /
-              totalIncome) *
-            100
-          : 0;
-
-      const burnRate =
-        averageMonthlyExpense;
-
-      const projectedMonthEndBalance =
-        totalAvailableFunds +
-        averageMonthlyIncome -
-        averageMonthlyExpense;
-
-      const largestCategory =
-        expenseCategories[0];
-
-      /*
-       * -----------------------------------------------
-       * INTELLIGENT NOTIFICATIONS
-       * -----------------------------------------------
-       */
-
-      const alerts: AlertItem[] =
-        [];
-
-      if (
-        totalIncome >
-        totalNetExpense
-      ) {
-        alerts.push({
-          id: "positive-cashflow",
-          level: "success",
-          title:
-            "Positive Financial Position",
-          description: `Income exceeds expenditure by ${money(
-            totalIncome -
-              totalNetExpense
-          )}.`,
-        });
-      } else if (
-        totalNetExpense >
-        totalIncome
-      ) {
-        alerts.push({
-          id: "negative-cashflow",
-          level: "danger",
-          title:
-            "Negative Cash Flow Alert",
-          description: `Expenses currently exceed income by ${money(
-            totalNetExpense -
-              totalIncome
-          )}.`,
-        });
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-
-      if (
-        pettyCashBalance <
-        averageMonthlyExpense *
-          0.1
-      ) {
-        alerts.push({
-          id: "low-petty-cash",
-          level: "warning",
-          title:
-            "Low Petty Cash Reserve",
-          description:
-            "Petty cash is below the recommended operating buffer.",
-        });
-      }
-
-      if (
-        largestCategory &&
-        largestCategory.percentage >
-          40
-      ) {
-        alerts.push({
-          id: "expense-concentration",
-          level: "warning",
-          title:
-            "High Expense Concentration",
-          description: `${largestCategory.name} represents ${percent(
-            largestCategory.percentage
-          )} of total expenditure.`,
-        });
-      }
-
-      if (
-        savingsRate >= 20
-      ) {
-        alerts.push({
-          id: "healthy-savings",
-          level: "success",
-          title:
-            "Healthy Financial Efficiency",
-          description: `Current surplus ratio is ${percent(
-            savingsRate
-          )}.`,
-        });
-      } else if (
-        savingsRate <
-        10
-      ) {
-        alerts.push({
-          id: "low-savings",
-          level: "info",
-          title:
-            "Surplus Improvement Opportunity",
-          description:
-            "Review high-value expense categories and improve the available operating surplus.",
-        });
-      }
-
-      /*
-       * -----------------------------------------------
-       * UPDATE STATE
-       * -----------------------------------------------
-       */
-
-      setSummary({
-        totalIncome,
-        totalExpense,
-        totalTds,
-        totalNetExpense,
-
-        netPosition:
-          totalIncome -
-          totalNetExpense,
-
-        bankBalance,
-        pettyCashBalance,
-        totalAvailableFunds,
-
-        bankIncome,
-        cashIncome,
-
-        bankExpense,
-        pettyCashExpense,
-
-        bankToPettyCash,
-        pettyCashToBank,
-
-        bankAdjustmentCredit,
-        bankAdjustmentDebit,
-        cashAdjustmentCredit,
-        cashAdjustmentDebit,
-
-        incomeCount:
-          incomes.length,
-
-        expenseCount:
-          expenses.length,
-
-        transferCount:
-          transfers.length,
-
-        monthlyTrend,
-        expenseCategories,
-        incomeModes,
-        expenseModes,
-        alerts,
-
-        averageMonthlyIncome,
-        averageMonthlyExpense,
-        savingsRate,
-        burnRate,
-        projectedMonthEndBalance,
-
-        largestExpenseCategory:
-          largestCategory?.name ||
-          "N/A",
-
-        largestExpenseCategoryAmount:
-          largestCategory?.value ||
-          0,
-      });
-
-      setLastUpdated(
-        new Date()
-      );
-    } catch (error: any) {
-      console.error(error);
-
-      setMessage(
-        error?.message ||
-          "Unable to load financial analytics."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    []
+  );
 
   useEffect(() => {
-    loadReports();
-  }, []);
+    loadAnalytics();
+  }, [loadAnalytics]);
 
   /*
-   * -----------------------------------------------
-   * ANALYTICAL INSIGHTS
-   * -----------------------------------------------
+   * =======================================================
+   * DERIVED VISUAL DATA
+   * =======================================================
    */
 
-  const insights = useMemo(() => {
-    const descriptive =
-      summary.totalIncome === 0 &&
-      summary.totalNetExpense === 0
-        ? "Financial transaction data is not yet available for analysis."
-        : `GPCC has recorded total income of ${money(
-            summary.totalIncome
-          )} and net expenditure of ${money(
-            summary.totalNetExpense
-          )}.`;
+  const healthLabel = useMemo(() => {
+    if (!summary) return "Calculating";
 
-    const diagnostic =
-      summary.largestExpenseCategory ===
-      "N/A"
-        ? "Expense category concentration cannot yet be determined."
-        : `${summary.largestExpenseCategory} is currently the largest expense category at ${money(
-            summary.largestExpenseCategoryAmount
-          )}.`;
+    if (
+      summary.financialHealthScore >= 80
+    ) {
+      return "Healthy";
+    }
 
-    const predictive =
-      `Based on the current average monthly financial pattern, the projected next-cycle fund position is approximately ${money(
-        summary.projectedMonthEndBalance
-      )}.`;
+    if (
+      summary.financialHealthScore >= 60
+    ) {
+      return "Stable";
+    }
 
-    const prescriptive =
-      summary.savingsRate < 10
-        ? "Prioritise expense optimisation and review the largest expense categories before additional discretionary spending."
-        : summary.savingsRate < 25
-        ? "Maintain current financial controls while monitoring high-value expenditure categories."
-        : "The current financial position is healthy. Consider maintaining a reserve buffer and documenting successful cost-control practices.";
+    if (
+      summary.financialHealthScore >= 40
+    ) {
+      return "Attention Required";
+    }
 
-    return {
-      descriptive,
-      diagnostic,
-      predictive,
-      prescriptive,
-    };
+    return "High Risk";
   }, [summary]);
 
-  /* =====================================================
-     LOADING
-  ===================================================== */
+  const forecastData = useMemo(() => {
+    if (!summary) return [];
+
+    const current =
+      summary.availableFunds;
+
+    const monthlyChange =
+      summary.projectedMonthlySurplus;
+
+    return Array.from(
+      { length: 6 },
+      (_, index) => {
+        const monthNumber = index + 1;
+
+        return {
+          month: `M${monthNumber}`,
+          projected:
+            current +
+            monthlyChange * monthNumber,
+        };
+      }
+    );
+  }, [summary]);
+
+  const fundDistribution = useMemo(() => {
+    if (!summary) return [];
+
+    return [
+      {
+        name: "Bank",
+        value: Math.max(
+          0,
+          summary.bankBalance
+        ),
+      },
+      {
+        name: "Petty Cash",
+        value: Math.max(
+          0,
+          summary.pettyCashBalance
+        ),
+      },
+    ];
+  }, [summary]);
 
   if (loading) {
     return (
       <div className="card">
         <h2>
-          Loading Financial Intelligence...
+          Loading Financial Intelligence
+          Centre...
         </h2>
 
         <p className="muted">
-          Analysing GPCC financial
-          transactions, trends and
-          control indicators.
+          Analysing GPCC financial data,
+          transaction trends, risks and
+          recommendations.
         </p>
       </div>
     );
   }
 
-  /* =====================================================
-     PAGE
-  ===================================================== */
+  if (!summary) {
+    return (
+      <div className="card">
+        <h2>
+          Financial analytics unavailable
+        </h2>
+
+        <p className="muted">
+          {message ||
+            "No financial data could be loaded."}
+        </p>
+
+        <button
+          className="btn"
+          onClick={() =>
+            loadAnalytics(true)
+          }
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
 
   return (
     <>
-      {/* ===============================================
-          HEADER
-      ================================================ */}
+      {/* ===================================================
+          PAGE HEADER
+      =================================================== */}
 
       <div className="pageHead">
         <div>
           <h1>
-            Reports & Analytics
+            Financial Intelligence Centre
           </h1>
 
           <p className="muted">
-            GPCC Financial Intelligence Centre
+            GPCC Reports, Analytics &
+            Decision Intelligence
           </p>
-
-          {lastUpdated && (
-            <small className="muted">
-              Last updated:{" "}
-              {lastUpdated.toLocaleString(
-                "en-IN"
-              )}
-            </small>
-          )}
         </div>
 
         <button
           className="btn secondary"
-          onClick={loadReports}
+          disabled={refreshing}
+          onClick={() =>
+            loadAnalytics(true)
+          }
         >
-          Refresh Analytics
+          {refreshing
+            ? "Refreshing..."
+            : "Refresh Intelligence"}
         </button>
       </div>
 
@@ -1460,9 +1357,87 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* ===============================================
+      {/* ===================================================
+          EXECUTIVE FINANCIAL HEALTH
+      =================================================== */}
+
+      <div
+        className="card"
+        style={{
+          marginBottom: 20,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent:
+              "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 20,
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                marginBottom: 6,
+              }}
+            >
+              GPCC Financial Health
+            </h2>
+
+            <p className="muted">
+              AI-inspired financial
+              intelligence based on
+              income, expenditure,
+              liquidity and financial
+              concentration indicators.
+            </p>
+          </div>
+
+          <div
+            style={{
+              textAlign: "right",
+            }}
+          >
+            <div className="muted">
+              Financial Health Score
+            </div>
+
+            <div
+              style={{
+                fontSize: 42,
+                fontWeight: 800,
+                lineHeight: 1.1,
+              }}
+            >
+              {
+                summary.financialHealthScore
+              }
+              <span
+                style={{
+                  fontSize: 18,
+                }}
+              >
+                /100
+              </span>
+            </div>
+
+            <div
+              className="muted"
+              style={{
+                marginTop: 4,
+              }}
+            >
+              {healthLabel}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ===================================================
           EXECUTIVE KPI CARDS
-      ================================================ */}
+      =================================================== */}
 
       <div className="grid">
         <div className="card">
@@ -1471,34 +1446,40 @@ export default function ReportsPage() {
           </div>
 
           <div className="metric">
-            {money(
-              summary.totalIncome
-            )}
+            {money(summary.totalIncome)}
           </div>
 
-          <small className="metricHint">
-            {
-              summary.incomeCount
-            } income transactions
-          </small>
+          <div className="muted">
+            Cleared income
+          </div>
         </div>
 
         <div className="card">
           <div className="muted">
-            Net Expenditure
+            Total Expenditure
           </div>
 
           <div className="metric">
-            {money(
-              summary.totalNetExpense
-            )}
+            {money(summary.totalExpense)}
           </div>
 
-          <small className="metricHint">
-            {
-              summary.expenseCount
-            } expense transactions
-          </small>
+          <div className="muted">
+            Gross recorded expenses
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Net Surplus / Deficit
+          </div>
+
+          <div className="metric">
+            {money(summary.netSurplus)}
+          </div>
+
+          <div className="muted">
+            Income less expenditure
+          </div>
         </div>
 
         <div className="card">
@@ -1508,521 +1489,850 @@ export default function ReportsPage() {
 
           <div className="metric">
             {money(
-              summary.totalAvailableFunds
+              summary.availableFunds
             )}
           </div>
 
-          <small className="metricHint">
+          <div className="muted">
             Bank + Petty Cash
-          </small>
+          </div>
         </div>
 
         <div className="card">
           <div className="muted">
-            Net Financial Position
+            TDS Analysed
           </div>
 
           <div className="metric">
-            {money(
-              summary.netPosition
-            )}
+            {money(summary.totalTds)}
           </div>
 
-          <small className="metricHint">
-            Income − Net Expense
-          </small>
+          <div className="muted">
+            Based on recorded expenses
+          </div>
         </div>
       </div>
 
-      {/* ===============================================
-          FUND HEALTH
-      ================================================ */}
+      {/* ===================================================
+          SMART NOTIFICATIONS
+      =================================================== */}
 
       <div
-        className="grid"
         style={{
           marginTop: 20,
         }}
       >
-        <div className="card">
-          <h3>
-            Financial Health Scorecard
-          </h3>
-
-          <div className="healthGrid">
-            <div className="healthItem">
-              <span>
-                Savings Rate
-              </span>
-
-              <strong>
-                {percent(
-                  summary.savingsRate
-                )}
-              </strong>
-            </div>
-
-            <div className="healthItem">
-              <span>
-                Monthly Burn Rate
-              </span>
-
-              <strong>
-                {money(
-                  summary.burnRate
-                )}
-              </strong>
-            </div>
-
-            <div className="healthItem">
-              <span>
-                Bank Position
-              </span>
-
-              <strong>
-                {money(
-                  summary.bankBalance
-                )}
-              </strong>
-            </div>
-
-            <div className="healthItem">
-              <span>
-                Petty Cash
-              </span>
-
-              <strong>
-                {money(
-                  summary.pettyCashBalance
-                )}
-              </strong>
-            </div>
-          </div>
-        </div>
-
-        <div className="card">
-          <h3>
-            Predictive Outlook
-          </h3>
-
-          <div className="forecastMetric">
-            <div className="muted">
-              Projected Fund Position
-            </div>
-
-            <div className="metric">
-              {money(
-                summary.projectedMonthEndBalance
-              )}
-            </div>
+        <div className="pageHead">
+          <div>
+            <h2>
+              Smart Financial Notifications
+            </h2>
 
             <p className="muted">
-              Projection based on the
-              observed average income and
-              expenditure pattern.
+              Automatically generated
+              alerts, risks and positive
+              indicators.
             </p>
           </div>
         </div>
+
+        <div className="grid">
+          {summary.notifications.map(
+            (notification) => {
+              const icon =
+                notification.type ===
+                "critical"
+                  ? "🔴"
+                  : notification.type ===
+                    "warning"
+                  ? "🟠"
+                  : notification.type ===
+                    "success"
+                  ? "🟢"
+                  : "🔵";
+
+              return (
+                <div
+                  key={notification.id}
+                  className="card"
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems:
+                        "flex-start",
+                    }}
+                  >
+                    <div>
+                      {icon}
+                    </div>
+
+                    <div>
+                      <strong>
+                        {
+                          notification.title
+                        }
+                      </strong>
+
+                      <p
+                        className="muted"
+                        style={{
+                          marginTop: 8,
+                          marginBottom: 0,
+                        }}
+                      >
+                        {
+                          notification.message
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+          )}
+        </div>
       </div>
 
-      {/* ===============================================
-          TREND ANALYSIS
-      ================================================ */}
+      {/* ===================================================
+          DESCRIPTIVE ANALYTICS
+      =================================================== */}
 
       <div
-        className="card"
         style={{
-          marginTop: 20,
+          marginTop: 30,
         }}
       >
-        <div className="sectionHead">
-          <div>
+        <h2>
+          📊 Descriptive Analytics
+        </h2>
+
+        <p className="muted">
+          What happened to GPCC finances?
+        </p>
+
+        <div
+          className="grid"
+          style={{
+            marginTop: 20,
+          }}
+        >
+          <div className="card">
             <h3>
-              Income vs Expense Trend
+              Income vs Expenditure Trend
             </h3>
 
             <p className="muted">
               Monthly financial movement
-              across available GPCC data.
+              based on available
+              transaction history.
             </p>
-          </div>
-        </div>
 
-        <TrendChart
-          data={
-            summary.monthlyTrend
-          }
-        />
-      </div>
+            <div
+              style={{
+                width: "100%",
+                height: 320,
+              }}
+            >
+              <ResponsiveContainer>
+                <AreaChart
+                  data={
+                    summary.monthlyTrend
+                  }
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                  />
 
-      {/* ===============================================
-          CATEGORY ANALYSIS
-      ================================================ */}
+                  <XAxis
+                    dataKey="month"
+                  />
 
-      <div
-        className="grid"
-        style={{
-          marginTop: 20,
-        }}
-      >
-        <div className="card">
-          <h3>
-            Expense Intelligence
-          </h3>
+                  <YAxis
+                    tickFormatter={
+                      compactMoney
+                    }
+                  />
 
-          <p className="muted">
-            Highest financial consumption
-            areas.
-          </p>
+                  <Tooltip
+                    formatter={(
+                      value: any
+                    ) => money(Number(value))}
+                  />
 
-          <CategoryChart
-            data={
-              summary.expenseCategories
-            }
-          />
-        </div>
+                  <Legend />
 
-        <div className="card">
-          <h3>
-            Transaction Channels
-          </h3>
+                  <Area
+                    type="monotone"
+                    dataKey="income"
+                    name="Income"
+                    fillOpacity={0.25}
+                  />
 
-          <DistributionChart
-            title="Income Distribution"
-            data={
-              summary.incomeModes
-            }
-          />
-
-          <div
-            style={{
-              height: 20,
-            }}
-          />
-
-          <DistributionChart
-            title="Expense Distribution"
-            data={
-              summary.expenseModes
-            }
-          />
-        </div>
-      </div>
-
-      {/* ===============================================
-          FOUR DIMENSION ANALYTICS
-      ================================================ */}
-
-      <div
-        className="analysisGrid"
-        style={{
-          marginTop: 20,
-        }}
-      >
-        <div className="analysisCard descriptive">
-          <div className="analysisTag">
-            DESCRIPTIVE
+                  <Area
+                    type="monotone"
+                    dataKey="expense"
+                    name="Expense"
+                    fillOpacity={0.25}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
 
-          <h3>
-            What Happened?
-          </h3>
-
-          <p>
-            {insights.descriptive}
-          </p>
-        </div>
-
-        <div className="analysisCard diagnostic">
-          <div className="analysisTag">
-            DIAGNOSTIC
-          </div>
-
-          <h3>
-            Why Did It Happen?
-          </h3>
-
-          <p>
-            {insights.diagnostic}
-          </p>
-        </div>
-
-        <div className="analysisCard predictive">
-          <div className="analysisTag">
-            PREDICTIVE
-          </div>
-
-          <h3>
-            What May Happen Next?
-          </h3>
-
-          <p>
-            {insights.predictive}
-          </p>
-        </div>
-
-        <div className="analysisCard prescriptive">
-          <div className="analysisTag">
-            PRESCRIPTIVE
-          </div>
-
-          <h3>
-            What Should GPCC Do?
-          </h3>
-
-          <p>
-            {insights.prescriptive}
-          </p>
-        </div>
-      </div>
-
-      {/* ===============================================
-          NOTIFICATION CENTRE
-      ================================================ */}
-
-      <div
-        className="card"
-        style={{
-          marginTop: 20,
-        }}
-      >
-        <div className="sectionHead">
-          <div>
+          <div className="card">
             <h3>
-              Financial Notification Centre
+              Expense Category Distribution
             </h3>
 
             <p className="muted">
-              Automated financial control
-              signals and recommendations.
+              Where is the GPCC budget
+              being spent?
             </p>
-          </div>
 
-          <span className="notificationCount">
-            {
-              summary.alerts.length
-            } Signals
-          </span>
-        </div>
-
-        {summary.alerts.length ===
-        0 ? (
-          <div className="emptyChart">
-            No critical financial
-            notifications at this time.
-          </div>
-        ) : (
-          <div className="alertList">
-            {summary.alerts.map(
-              (alert) => (
-                <div
-                  className={`alertItem ${alert.level}`}
-                  key={alert.id}
-                >
-                  <div className="alertContent">
-                    <strong>
-                      {alert.title}
-                    </strong>
-
-                    <p>
-                      {
-                        alert.description
+            <div
+              style={{
+                width: "100%",
+                height: 320,
+              }}
+            >
+              {summary.expenseCategories
+                .length > 0 ? (
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={
+                        summary.expenseCategories
                       }
-                    </p>
-                  </div>
+                      dataKey="value"
+                      nameKey="name"
+                      outerRadius={100}
+                      label={(entry: any) =>
+                        `${entry.name}: ${entry.percentage.toFixed(
+                          0
+                        )}%`
+                      }
+                    >
+                      {summary.expenseCategories.map(
+                        (_, index) => (
+                          <Cell
+                            key={`cell-${index}`}
+                          />
+                        )
+                      )}
+                    </Pie>
+
+                    <Tooltip
+                      formatter={(
+                        value: any
+                      ) =>
+                        money(Number(value))
+                      }
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div
+                  className="muted"
+                  style={{
+                    paddingTop: 100,
+                    textAlign: "center",
+                  }}
+                >
+                  No expense category data
+                  available.
                 </div>
-              )
-            )}
+              )}
+            </div>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* ===============================================
-          FINANCIAL CONTROL DETAIL
-      ================================================ */}
+      {/* ===================================================
+          DIAGNOSTIC ANALYTICS
+      =================================================== */}
 
       <div
-        className="grid"
         style={{
-          marginTop: 20,
+          marginTop: 30,
         }}
       >
-        <div className="card">
-          <h3>
-            Fund Movement
-          </h3>
+        <h2>
+          🔍 Diagnostic Analytics
+        </h2>
 
-          <div className="tableWrap">
-            <table className="table">
-              <tbody>
-                <tr>
-                  <td>
-                    Bank → Petty Cash
-                  </td>
+        <p className="muted">
+          Why is the financial position
+          changing?
+        </p>
 
-                  <td>
-                    {money(
-                      summary.bankToPettyCash
-                    )}
-                  </td>
-                </tr>
+        <div
+          className="grid"
+          style={{
+            marginTop: 20,
+          }}
+        >
+          <div className="card">
+            <h3>
+              Top Expense Drivers
+            </h3>
 
-                <tr>
-                  <td>
-                    Petty Cash → Bank
-                  </td>
+            <div
+              style={{
+                width: "100%",
+                height: 350,
+              }}
+            >
+              <ResponsiveContainer>
+                <BarChart
+                  data={
+                    summary.expenseCategories
+                  }
+                  layout="vertical"
+                  margin={{
+                    left: 30,
+                  }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                  />
 
-                  <td>
-                    {money(
-                      summary.pettyCashToBank
-                    )}
-                  </td>
-                </tr>
+                  <XAxis
+                    type="number"
+                    tickFormatter={
+                      compactMoney
+                    }
+                  />
 
-                <tr>
-                  <td>
-                    Bank Adjustments
-                  </td>
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={120}
+                  />
 
-                  <td>
-                    {money(
-                      summary.bankAdjustmentCredit -
-                        summary.bankAdjustmentDebit
-                    )}
-                  </td>
-                </tr>
+                  <Tooltip
+                    formatter={(
+                      value: any
+                    ) => money(Number(value))}
+                  />
 
-                <tr>
-                  <td>
-                    Cash Adjustments
-                  </td>
+                  <Bar
+                    dataKey="value"
+                    name="Expense"
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
 
-                  <td>
-                    {money(
-                      summary.cashAdjustmentCredit -
-                        summary.cashAdjustmentDebit
-                    )}
-                  </td>
-                </tr>
+          <div className="card">
+            <h3>
+              Fund Utilisation
+            </h3>
 
-                <tr>
-                  <th>
-                    Transfer Transactions
-                  </th>
+            <p className="muted">
+              Comparison between Bank and
+              Petty Cash.
+            </p>
 
-                  <th>
-                    {number(
-                      summary.transferCount
-                    )}
-                  </th>
-                </tr>
-              </tbody>
-            </table>
+            <div
+              style={{
+                width: "100%",
+                height: 320,
+              }}
+            >
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie
+                    data={fundDistribution}
+                    dataKey="value"
+                    nameKey="name"
+                    outerRadius={105}
+                    label={(entry: any) =>
+                      `${entry.name}: ${money(
+                        entry.value
+                      )}`
+                    }
+                  />
+
+                  <Tooltip
+                    formatter={(
+                      value: any
+                    ) => money(Number(value))}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 
-        <div className="card">
-          <h3>
-            Tax & Expenditure Control
-          </h3>
+        <div
+          className="grid"
+          style={{
+            marginTop: 20,
+          }}
+        >
+          <div className="card">
+            <h3>
+              Payment Mode Analysis
+            </h3>
 
-          <div className="tableWrap">
-            <table className="table">
-              <tbody>
-                <tr>
-                  <td>
-                    Gross Expense
-                  </td>
+            <div
+              style={{
+                width: "100%",
+                height: 300,
+              }}
+            >
+              <ResponsiveContainer>
+                <BarChart
+                  data={
+                    summary.paymentModes
+                  }
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                  />
 
-                  <td>
-                    {money(
-                      summary.totalExpense
-                    )}
-                  </td>
-                </tr>
+                  <XAxis
+                    dataKey="name"
+                  />
 
-                <tr>
-                  <td>
-                    Total TDS
-                  </td>
-
-                  <td>
-                    {money(
-                      summary.totalTds
-                    )}
-                  </td>
-                </tr>
-
-                <tr>
-                  <td>
-                    Net Payment
-                  </td>
-
-                  <td>
-                    {money(
-                      summary.totalNetExpense
-                    )}
-                  </td>
-                </tr>
-
-                <tr>
-                  <td>
-                    Largest Expense Area
-                  </td>
-
-                  <td>
-                    {
-                      summary.largestExpenseCategory
+                  <YAxis
+                    tickFormatter={
+                      compactMoney
                     }
-                  </td>
-                </tr>
+                  />
 
-                <tr>
-                  <th>
-                    Largest Category Value
-                  </th>
+                  <Tooltip
+                    formatter={(
+                      value: any
+                    ) => money(Number(value))}
+                  />
 
-                  <th>
-                    {money(
-                      summary.largestExpenseCategoryAmount
-                    )}
-                  </th>
-                </tr>
-              </tbody>
-            </table>
+                  <Bar
+                    dataKey="value"
+                    name="Amount"
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3>
+              Financial Movement
+            </h3>
+
+            <div className="tableWrap">
+              <table className="table">
+                <tbody>
+                  <tr>
+                    <td>
+                      Bank Income
+                    </td>
+                    <td>
+                      {money(
+                        summary.bankIncome
+                      )}
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td>
+                      Cash Income
+                    </td>
+                    <td>
+                      {money(
+                        summary.cashIncome
+                      )}
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td>
+                      Bank Expenses
+                    </td>
+                    <td>
+                      {money(
+                        summary.bankExpense
+                      )}
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td>
+                      Petty Cash Expenses
+                    </td>
+                    <td>
+                      {money(
+                        summary.pettyCashExpense
+                      )}
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td>
+                      Bank → Petty Cash
+                    </td>
+                    <td>
+                      {money(
+                        summary.bankToPettyCash
+                      )}
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td>
+                      Petty Cash → Bank
+                    </td>
+                    <td>
+                      {money(
+                        summary.pettyCashToBank
+                      )}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ===============================================
-          CONTROL FOOTER
-      ================================================ */}
+      {/* ===================================================
+          PREDICTIVE ANALYTICS
+      =================================================== */}
+
+      <div
+        style={{
+          marginTop: 30,
+        }}
+      >
+        <h2>
+          🔮 Predictive Analytics
+        </h2>
+
+        <p className="muted">
+          What may happen if current
+          financial patterns continue?
+        </p>
+
+        <div className="grid">
+          <div className="card">
+            <div className="muted">
+              Average Monthly Income
+            </div>
+
+            <div className="metric">
+              {money(
+                summary.averageMonthlyIncome
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="muted">
+              Average Monthly Expense
+            </div>
+
+            <div className="metric">
+              {money(
+                summary.averageMonthlyExpense
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="muted">
+              Projected Monthly Surplus
+            </div>
+
+            <div className="metric">
+              {money(
+                summary.projectedMonthlySurplus
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="muted">
+              Estimated Financial Runway
+            </div>
+
+            <div className="metric">
+              {summary.runwayMonths.toFixed(
+                1
+              )}{" "}
+              months
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="card"
+          style={{
+            marginTop: 20,
+          }}
+        >
+          <h3>
+            Six-Month Financial Projection
+          </h3>
+
+          <p className="muted">
+            Projection based on current
+            average income and expenditure
+            patterns.
+          </p>
+
+          <div
+            style={{
+              width: "100%",
+              height: 350,
+            }}
+          >
+            <ResponsiveContainer>
+              <LineChart
+                data={forecastData}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                />
+
+                <XAxis
+                  dataKey="month"
+                />
+
+                <YAxis
+                  tickFormatter={
+                    compactMoney
+                  }
+                />
+
+                <Tooltip
+                  formatter={(
+                    value: any
+                  ) => money(Number(value))}
+                />
+
+                <Legend />
+
+                <Line
+                  type="monotone"
+                  dataKey="projected"
+                  name="Projected Available Funds"
+                  strokeWidth={3}
+                  dot={{
+                    r: 5,
+                  }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* ===================================================
+          PRESCRIPTIVE ANALYTICS
+      =================================================== */}
+
+      <div
+        style={{
+          marginTop: 30,
+        }}
+      >
+        <h2>
+          💡 Prescriptive Analytics
+        </h2>
+
+        <p className="muted">
+          What actions should GPCC
+          consider next?
+        </p>
+
+        <div className="grid">
+          {summary.recommendations.map(
+            (recommendation) => {
+              const icon =
+                recommendation.priority ===
+                "High"
+                  ? "🚨"
+                  : recommendation.priority ===
+                    "Medium"
+                  ? "⚠️"
+                  : "💡";
+
+              return (
+                <div
+                  key={
+                    recommendation.id
+                  }
+                  className="card"
+                >
+                  <div
+                    className="muted"
+                    style={{
+                      marginBottom: 8,
+                    }}
+                  >
+                    {icon}{" "}
+                    {
+                      recommendation.priority
+                    }{" "}
+                    Priority
+                  </div>
+
+                  <h3>
+                    {
+                      recommendation.title
+                    }
+                  </h3>
+
+                  <p className="muted">
+                    {
+                      recommendation.description
+                    }
+                  </p>
+                </div>
+              );
+            }
+          )}
+        </div>
+      </div>
+
+      {/* ===================================================
+          DETAILED FINANCIAL INTELLIGENCE
+      =================================================== */}
+
+      <div
+        className="card"
+        style={{
+          marginTop: 30,
+        }}
+      >
+        <h2>
+          Detailed Financial Intelligence
+        </h2>
+
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>
+                  Month
+                </th>
+
+                <th>
+                  Income
+                </th>
+
+                <th>
+                  Expense
+                </th>
+
+                <th>
+                  Surplus / Deficit
+                </th>
+
+                <th>
+                  Cumulative Movement
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {summary.monthlyTrend.map(
+                (row) => (
+                  <tr key={row.month}>
+                    <td>
+                      {row.month}
+                    </td>
+
+                    <td>
+                      {money(
+                        row.income
+                      )}
+                    </td>
+
+                    <td>
+                      {money(
+                        row.expense
+                      )}
+                    </td>
+
+                    <td>
+                      {money(
+                        row.surplus
+                      )}
+                    </td>
+
+                    <td>
+                      {money(
+                        row.cumulative
+                      )}
+                    </td>
+                  </tr>
+                )
+              )}
+
+              {summary.monthlyTrend
+                .length === 0 && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="muted"
+                  >
+                    No monthly transaction
+                    history is available yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ===================================================
+          CONTROL SUMMARY
+      =================================================== */}
 
       <div
         className="card"
         style={{
           marginTop: 20,
-          marginBottom: 20,
         }}
       >
         <h3>
-          GPCC Financial Intelligence Summary
+          GPCC Financial Intelligence
+          Summary
         </h3>
 
         <p className="muted">
-          This analytics layer combines
-          descriptive, diagnostic,
-          predictive and prescriptive
-          analysis from GPCC income,
-          expenditure, TDS, fund transfer,
-          bank and petty cash data.
+          This dashboard combines
+          descriptive analysis to explain
+          what happened, diagnostic
+          analysis to identify key
+          financial drivers, predictive
+          analysis to estimate future
+          financial movement, and
+          prescriptive analysis to
+          recommend actions.
         </p>
 
         <p className="muted">
-          Internal transfers between Bank
-          and Petty Cash change fund
-          location but do not change total
-          available GPCC funds.
+          Internal transfers between
+          Bank and Petty Cash do not
+          change total GPCC funds.
+          They only redistribute funds
+          between financial accounts.
+        </p>
+
+        <p className="muted">
+          Predictive results are based
+          on currently available
+          transaction history and should
+          be treated as financial
+          indicators rather than
+          guaranteed forecasts.
         </p>
       </div>
     </>
