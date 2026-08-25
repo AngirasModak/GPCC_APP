@@ -2,6 +2,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
+
+import {
+  AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
+  Bell,
+  Brain,
+  CircleDollarSign,
+  Landmark,
+  Lightbulb,
+  RefreshCw,
+  ShieldCheck,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+} from "lucide-react";
+
 import {
   Area,
   AreaChart,
@@ -9,9 +26,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -65,18 +79,17 @@ type DashboardSummary = {
   totalFunds: number;
 };
 
-type NotificationItem = {
-  id: string;
-  level: "critical" | "warning" | "success" | "info";
+type AlertItem = {
+  type: "danger" | "warning" | "success" | "info";
   title: string;
-  message: string;
+  description: string;
 };
 
-type TrendPoint = {
+type MonthlyData = {
   month: string;
   income: number;
   expense: number;
-  surplus: number;
+  net: number;
 };
 
 /* =========================================================
@@ -90,68 +103,8 @@ const money = (n: number) =>
     maximumFractionDigits: 0,
   }).format(Number(n || 0));
 
-const compactMoney = (n: number) =>
-  new Intl.NumberFormat("en-IN", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(Number(n || 0));
-
 const normalize = (value: unknown) =>
   String(value || "").trim().toLowerCase();
-
-const getDate = (row: any) =>
-  row.date ||
-  row.transaction_date ||
-  row.payment_date ||
-  row.created_at ||
-  null;
-
-const getMonthKey = (dateValue: any) => {
-  if (!dateValue) return null;
-
-  const date = new Date(dateValue);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return `${date.getFullYear()}-${String(
-    date.getMonth() + 1
-  ).padStart(2, "0")}`;
-};
-
-const formatMonth = (key: string) => {
-  const [year, month] = key.split("-");
-
-  return new Date(
-    Number(year),
-    Number(month) - 1,
-    1
-  ).toLocaleDateString("en-IN", {
-    month: "short",
-    year: "2-digit",
-  });
-};
-
-const getNetPayment = (row: any) => {
-  if (
-    row.net_amount !== null &&
-    row.net_amount !== undefined
-  ) {
-    return Number(row.net_amount || 0);
-  }
-
-  const gross = Number(row.gross_amount || 0);
-
-  const tds =
-    row.tds_amount !== null &&
-    row.tds_amount !== undefined
-      ? Number(row.tds_amount || 0)
-      : gross *
-        (Number(row.tds_rate || 0) / 100);
-
-  return gross - tds;
-};
 
 const initialSummary: DashboardSummary = {
   income: 0,
@@ -178,6 +131,43 @@ const initialSummary: DashboardSummary = {
   totalFunds: 0,
 };
 
+const getDate = (row: any) => {
+  return (
+    row.transaction_date ||
+    row.date ||
+    row.expense_date ||
+    row.income_date ||
+    row.created_at
+  );
+};
+
+const monthKey = (date: string) => {
+  const d = new Date(date);
+
+  if (Number.isNaN(d.getTime())) {
+    return "Unknown";
+  }
+
+  return `${d.getFullYear()}-${String(
+    d.getMonth() + 1
+  ).padStart(2, "0")}`;
+};
+
+const monthLabel = (key: string) => {
+  if (key === "Unknown") return key;
+
+  const [year, month] = key.split("-");
+
+  return new Date(
+    Number(year),
+    Number(month) - 1,
+    1
+  ).toLocaleDateString("en-IN", {
+    month: "short",
+    year: "2-digit",
+  });
+};
+
 /* =========================================================
    DASHBOARD
 ========================================================= */
@@ -193,30 +183,12 @@ export default function Dashboard() {
 
   const [msg, setMsg] = useState("");
 
-  const [incomes, setIncomes] = useState<any[]>([]);
-  const [expenses, setExpenses] = useState<any[]>([]);
-  const [transfers, setTransfers] = useState<any[]>([]);
-
   const [s, setS] =
     useState<DashboardSummary>(initialSummary);
 
-  const [bankSetupForm, setBankSetupForm] =
-    useState({
-      account_name: "GPCC Cultural Bank Account",
-      opening_balance: "",
-      opening_balance_date: new Date()
-        .toISOString()
-        .slice(0, 10),
-    });
-
-  const [pettyCashSetupForm, setPettyCashSetupForm] =
-    useState({
-      account_name: "GPCC Petty Cash",
-      opening_balance: "",
-      opening_balance_date: new Date()
-        .toISOString()
-        .slice(0, 10),
-    });
+  const [incomes, setIncomes] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [transfers, setTransfers] = useState<any[]>([]);
 
   /* =========================================================
      LOAD DASHBOARD
@@ -228,11 +200,11 @@ export default function Dashboard() {
 
     try {
       const [
-        bankResponse,
-        pettyCashResponse,
-        incomeResponse,
-        expenseResponse,
-        transferResponse,
+        bankResult,
+        pettyCashResult,
+        incomeResult,
+        expenseResult,
+        transferResult,
       ] = await Promise.all([
         supabase
           .from("bank_accounts")
@@ -264,51 +236,40 @@ export default function Dashboard() {
           .is("deleted_at", null),
       ]);
 
-      if (bankResponse.error) {
-        throw new Error(bankResponse.error.message);
+      if (bankResult.error) {
+        throw new Error(bankResult.error.message);
       }
 
-      if (pettyCashResponse.error) {
-        throw new Error(
-          pettyCashResponse.error.message
-        );
+      if (pettyCashResult.error) {
+        throw new Error(pettyCashResult.error.message);
       }
 
-      if (incomeResponse.error) {
-        throw new Error(
-          incomeResponse.error.message
-        );
+      if (incomeResult.error) {
+        throw new Error(incomeResult.error.message);
       }
 
-      if (expenseResponse.error) {
-        throw new Error(
-          expenseResponse.error.message
-        );
+      if (expenseResult.error) {
+        throw new Error(expenseResult.error.message);
       }
 
-      if (transferResponse.error) {
-        throw new Error(
-          transferResponse.error.message
-        );
+      if (transferResult.error) {
+        throw new Error(transferResult.error.message);
       }
 
-      const bankData =
-        bankResponse.data as BankAccount | null;
+      const bankData = bankResult.data;
+      const pettyCashData = pettyCashResult.data;
 
-      const pettyCashData =
-        pettyCashResponse.data as PettyCashAccount | null;
+      const incomeRows = incomeResult.data || [];
+      const expenseRows = expenseResult.data || [];
+      const transferRows = transferResult.data || [];
 
-      const incomeRows =
-        incomeResponse.data || [];
+      setBankAccount(
+        bankData as BankAccount | null
+      );
 
-      const expenseRows =
-        expenseResponse.data || [];
-
-      const transferRows =
-        transferResponse.data || [];
-
-      setBankAccount(bankData);
-      setPettyCashAccount(pettyCashData);
+      setPettyCashAccount(
+        pettyCashData as PettyCashAccount | null
+      );
 
       setIncomes(incomeRows);
       setExpenses(expenseRows);
@@ -320,8 +281,8 @@ export default function Dashboard() {
       }
 
       /* =====================================================
-         INCOME CALCULATION
-      ===================================================== */
+         INCOME
+      ====================================================== */
 
       const totalIncome = incomeRows.reduce(
         (sum, row) =>
@@ -341,53 +302,58 @@ export default function Dashboard() {
         );
 
       const totalBankIncome =
-        incomeRows
-          .filter(
-            (row) =>
-              normalize(row.mode) !== "cash"
-          )
-          .reduce(
-            (sum, row) =>
-              sum +
-              Number(row.amount || 0),
-            0
-          );
+        totalIncome - totalCashIncome;
 
       /* =====================================================
-         EXPENSE CALCULATION
-      ===================================================== */
+         EXPENSE
+      ====================================================== */
 
-      const totalExpense =
-        expenseRows.reduce(
-          (sum, row) =>
-            sum +
-            Number(row.gross_amount || 0),
-          0
+      const totalExpense = expenseRows.reduce(
+        (sum, row) =>
+          sum +
+          Number(row.gross_amount || 0),
+        0
+      );
+
+      const totalTds = expenseRows.reduce(
+        (sum, row) => {
+          const gross = Number(
+            row.gross_amount || 0
+          );
+
+          const tds =
+            row.tds_amount !== null &&
+            row.tds_amount !== undefined
+              ? Number(row.tds_amount || 0)
+              : gross *
+                (Number(row.tds_rate || 0) / 100);
+
+          return sum + tds;
+        },
+        0
+      );
+
+      const getNetPayment = (row: any) => {
+        if (
+          row.net_amount !== null &&
+          row.net_amount !== undefined
+        ) {
+          return Number(row.net_amount || 0);
+        }
+
+        const gross = Number(
+          row.gross_amount || 0
         );
 
-      const totalTds =
-        expenseRows.reduce(
-          (sum, row) => {
-            const gross = Number(
-              row.gross_amount || 0
-            );
+        const tds =
+          row.tds_amount !== null &&
+          row.tds_amount !== undefined
+            ? Number(row.tds_amount || 0)
+            : gross *
+              (Number(row.tds_rate || 0) / 100);
 
-            const tds =
-              row.tds_amount !== null &&
-              row.tds_amount !== undefined
-                ? Number(
-                    row.tds_amount || 0
-                  )
-                : gross *
-                  (Number(
-                    row.tds_rate || 0
-                  ) /
-                    100);
-
-            return sum + tds;
-          },
-          0
-        );
+        return gross - tds;
+      };
 
       const totalPettyCashExpense =
         expenseRows
@@ -419,7 +385,7 @@ export default function Dashboard() {
 
       /* =====================================================
          FUND TRANSFERS
-      ===================================================== */
+      ====================================================== */
 
       const totalBankToPettyCash =
         transferRows
@@ -457,10 +423,6 @@ export default function Dashboard() {
               Number(row.amount || 0),
             0
           );
-
-      /* =====================================================
-         ADJUSTMENTS
-      ===================================================== */
 
       const totalBankAdjustmentCredit =
         transferRows
@@ -535,10 +497,10 @@ export default function Dashboard() {
           );
 
       /* =====================================================
-         FINAL POSITIONS
-      ===================================================== */
+         FINAL BALANCES
+      ====================================================== */
 
-      const currentBankBalance =
+      const bank =
         Number(
           bankData.opening_balance || 0
         ) +
@@ -549,7 +511,7 @@ export default function Dashboard() {
         totalBankAdjustmentCredit -
         totalBankAdjustmentDebit;
 
-      const currentPettyCashBalance =
+      const pettyCash =
         Number(
           pettyCashData.opening_balance || 0
         ) +
@@ -559,10 +521,6 @@ export default function Dashboard() {
         totalPettyCashToBank +
         totalCashAdjustmentCredit -
         totalCashAdjustmentDebit;
-
-      const totalAvailableFunds =
-        currentBankBalance +
-        currentPettyCashBalance;
 
       setS({
         income: totalIncome,
@@ -594,18 +552,16 @@ export default function Dashboard() {
         cashAdjustmentDebit:
           totalCashAdjustmentDebit,
 
-        bank: currentBankBalance,
-        pettyCash:
-          currentPettyCashBalance,
-        totalFunds:
-          totalAvailableFunds,
+        bank,
+        pettyCash,
+        totalFunds: bank + pettyCash,
       });
     } catch (error: any) {
       console.error(error);
 
       setMsg(
         error?.message ||
-          "Unable to load dashboard data."
+          "Unable to load dashboard."
       );
     } finally {
       setLoading(false);
@@ -617,148 +573,135 @@ export default function Dashboard() {
   }, []);
 
   /* =========================================================
-     ANALYTICS ENGINE
+     CURRENT MONTH ANALYSIS
   ========================================================= */
 
-  const analytics = useMemo(() => {
-    const monthly: Record<
+  const currentMonth = useMemo(() => {
+    const now = new Date();
+
+    const month = now.getMonth();
+    const year = now.getFullYear();
+
+    const monthIncome = incomes
+      .filter((row) => {
+        const date = new Date(getDate(row));
+
+        return (
+          date.getMonth() === month &&
+          date.getFullYear() === year
+        );
+      })
+      .reduce(
+        (sum, row) =>
+          sum + Number(row.amount || 0),
+        0
+      );
+
+    const monthExpense = expenses
+      .filter((row) => {
+        const date = new Date(getDate(row));
+
+        return (
+          date.getMonth() === month &&
+          date.getFullYear() === year
+        );
+      })
+      .reduce(
+        (sum, row) =>
+          sum +
+          Number(row.gross_amount || 0),
+        0
+      );
+
+    return {
+      income: monthIncome,
+      expense: monthExpense,
+      net: monthIncome - monthExpense,
+    };
+  }, [incomes, expenses]);
+
+  /* =========================================================
+     MONTHLY CASH FLOW - LAST 6 MONTHS
+  ========================================================= */
+
+  const monthlyData = useMemo(() => {
+    const map: Record<
       string,
-      TrendPoint
+      MonthlyData
     > = {};
 
     incomes.forEach((row) => {
-      const key = getMonthKey(
-        getDate(row)
-      );
+      const key = monthKey(getDate(row));
 
-      if (!key) return;
-
-      if (!monthly[key]) {
-        monthly[key] = {
-          month: formatMonth(key),
+      if (!map[key]) {
+        map[key] = {
+          month: monthLabel(key),
           income: 0,
           expense: 0,
-          surplus: 0,
+          net: 0,
         };
       }
 
-      monthly[key].income += Number(
+      map[key].income += Number(
         row.amount || 0
       );
     });
 
     expenses.forEach((row) => {
-      const key = getMonthKey(
-        getDate(row)
-      );
+      const key = monthKey(getDate(row));
 
-      if (!key) return;
-
-      if (!monthly[key]) {
-        monthly[key] = {
-          month: formatMonth(key),
+      if (!map[key]) {
+        map[key] = {
+          month: monthLabel(key),
           income: 0,
           expense: 0,
-          surplus: 0,
+          net: 0,
         };
       }
 
-      monthly[key].expense += Number(
+      map[key].expense += Number(
         row.gross_amount || 0
       );
     });
 
-    const trendData = Object.entries(
-      monthly
-    )
+    return Object.entries(map)
       .sort(([a], [b]) =>
         a.localeCompare(b)
       )
+      .slice(-6)
       .map(([, value]) => ({
         ...value,
-        surplus:
+        net:
           value.income -
           value.expense,
       }));
-
-    /* EXPENSE CATEGORIES */
-
-    const categoryMap: Record<
-      string,
-      number
-    > = {};
-
-    expenses.forEach((row) => {
-      const category =
-        row.category ||
-        row.expense_category ||
-        "Uncategorized";
-
-      categoryMap[category] =
-        (categoryMap[category] || 0) +
-        Number(row.gross_amount || 0);
-    });
-
-    const expenseCategories =
-      Object.entries(categoryMap)
-        .map(([name, value]) => ({
-          name,
-          value,
-        }))
-        .sort(
-          (a, b) =>
-            b.value - a.value
-        )
-        .slice(0, 8);
-
-    /* LARGEST EXPENSES */
-
-    const largestExpenses =
-      [...expenses]
-        .sort(
-          (a, b) =>
-            Number(
-              b.gross_amount || 0
-            ) -
-            Number(
-              a.gross_amount || 0
-            )
-        )
-        .slice(0, 5);
-
-    return {
-      trendData,
-      expenseCategories,
-      largestExpenses,
-    };
   }, [incomes, expenses]);
 
   /* =========================================================
-     HEALTH SCORE
+     FINANCIAL HEALTH SCORE
   ========================================================= */
 
-  const financialHealth = useMemo(() => {
+  const health = useMemo(() => {
     let score = 100;
 
-    const surplus =
-      s.income - s.expense;
+    const netRatio =
+      s.income > 0
+        ? (s.income - s.expense) /
+          s.income
+        : 0;
 
-    if (surplus < 0) score -= 30;
+    if (netRatio < 0) score -= 30;
+    else if (netRatio < 0.1) score -= 15;
 
-    if (s.totalFunds < 0) score -= 40;
-
-    if (
-      s.totalFunds > 0 &&
-      s.pettyCash > s.totalFunds * 0.5
-    ) {
+    if (s.pettyCash < 1000) {
       score -= 10;
     }
 
     if (
-      s.expense > s.income &&
-      s.income > 0
+      s.totalFunds > 0 &&
+      s.tds / s.totalFunds > 0.2
     ) {
-      score -= 15;
+      score -= 10;
     }
 
     score = Math.max(
@@ -766,545 +709,188 @@ export default function Dashboard() {
       Math.min(100, score)
     );
 
-    let status = "Excellent";
+    let label = "Excellent";
 
-    if (score < 40) {
-      status = "Critical";
-    } else if (score < 60) {
-      status = "Needs Attention";
-    } else if (score < 80) {
-      status = "Healthy";
-    }
+    if (score < 50) label = "Critical";
+    else if (score < 70) label = "Needs Attention";
+    else if (score < 85) label = "Healthy";
 
     return {
       score,
-      status,
-      surplus,
+      label,
     };
   }, [s]);
-
-  /* =========================================================
-     PREDICTIVE ANALYSIS
-  ========================================================= */
-
-  const prediction = useMemo(() => {
-    const months =
-      analytics.trendData.length;
-
-    if (!months) {
-      return {
-        avgIncome: 0,
-        avgExpense: 0,
-        projectedSurplus: 0,
-      };
-    }
-
-    const avgIncome =
-      analytics.trendData.reduce(
-        (sum, row) =>
-          sum + row.income,
-        0
-      ) / months;
-
-    const avgExpense =
-      analytics.trendData.reduce(
-        (sum, row) =>
-          sum + row.expense,
-        0
-      ) / months;
-
-    return {
-      avgIncome,
-      avgExpense,
-      projectedSurplus:
-        avgIncome - avgExpense,
-    };
-  }, [analytics]);
 
   /* =========================================================
      NOTIFICATIONS
   ========================================================= */
 
-  const notifications =
-    useMemo<NotificationItem[]>(() => {
-      const list: NotificationItem[] =
-        [];
+  const alerts = useMemo<AlertItem[]>(() => {
+    const list: AlertItem[] = [];
 
-      const surplus =
-        s.income - s.expense;
+    if (s.pettyCash < 1000) {
+      list.push({
+        type: "warning",
+        title: "Low Petty Cash",
+        description:
+          "Petty cash is below the recommended operating threshold.",
+      });
+    }
 
-      if (s.totalFunds < 0) {
-        list.push({
-          id: "negative-funds",
-          level: "critical",
-          title:
-            "Negative Fund Position",
-          message:
-            "Total available funds are negative and require immediate attention.",
-        });
-      }
+    if (currentMonth.expense > currentMonth.income) {
+      list.push({
+        type: "danger",
+        title: "Negative Monthly Cash Flow",
+        description:
+          "Current month expenses are higher than income.",
+      });
+    }
 
-      if (surplus < 0) {
-        list.push({
-          id: "expense-alert",
-          level: "critical",
-          title:
-            "Expenses Exceed Income",
-          message: `Current deficit is ${money(
-            Math.abs(surplus)
-          )}.`,
-        });
-      }
+    const largeExpense =
+      expenses.some(
+        (row) =>
+          Number(
+            row.gross_amount || 0
+          ) >
+          Math.max(
+            50000,
+            s.expense * 0.25
+          )
+      );
 
-      if (
-        s.totalFunds > 0 &&
-        s.pettyCash >
-          s.totalFunds * 0.4
-      ) {
-        list.push({
-          id: "cash-concentration",
-          level: "warning",
-          title:
-            "High Petty Cash Concentration",
-          message:
-            "A significant proportion of GPCC funds are currently held as petty cash.",
-        });
-      }
+    if (largeExpense) {
+      list.push({
+        type: "warning",
+        title: "High Value Expense Detected",
+        description:
+          "A significant expense requires management attention.",
+      });
+    }
 
-      if (
-        s.bank < 0 ||
-        s.pettyCash < 0
-      ) {
-        list.push({
-          id: "negative-account",
-          level: "critical",
-          title:
-            "Negative Account Balance",
-          message:
-            "One or more financial positions have fallen below zero.",
-        });
-      }
+    if (
+      currentMonth.income >
+      currentMonth.expense
+    ) {
+      list.push({
+        type: "success",
+        title: "Positive Cash Flow",
+        description:
+          "Current month income is higher than current month expenditure.",
+      });
+    }
 
-      if (
-        prediction.projectedSurplus < 0
-      ) {
-        list.push({
-          id: "forecast-risk",
-          level: "warning",
-          title:
-            "Projected Financial Deficit",
-          message:
-            "Current historical run-rate indicates a possible negative monthly surplus.",
-        });
-      }
+    if (!list.length) {
+      list.push({
+        type: "info",
+        title: "Financial Position Stable",
+        description:
+          "No major financial risk indicators are currently detected.",
+      });
+    }
 
-      if (!list.length) {
-        list.push({
-          id: "healthy",
-          level: "success",
-          title:
-            "Financial Position Stable",
-          message:
-            "No immediate financial control exception has been detected.",
-        });
-      }
-
-      return list;
-    }, [s, prediction]);
+    return list;
+  }, [
+    s,
+    currentMonth,
+    expenses,
+  ]);
 
   /* =========================================================
-     PRESCRIPTIVE RECOMMENDATIONS
+     PREDICTIVE ANALYSIS
+  ========================================================= */
+
+  const forecast = useMemo(() => {
+    if (!monthlyData.length) {
+      return {
+        projectedIncome: 0,
+        projectedExpense: 0,
+        projectedFunds: s.totalFunds,
+      };
+    }
+
+    const avgIncome =
+      monthlyData.reduce(
+        (sum, row) =>
+          sum + row.income,
+        0
+      ) / monthlyData.length;
+
+    const avgExpense =
+      monthlyData.reduce(
+        (sum, row) =>
+          sum + row.expense,
+        0
+      ) / monthlyData.length;
+
+    return {
+      projectedIncome: avgIncome,
+      projectedExpense: avgExpense,
+      projectedFunds:
+        s.totalFunds +
+        avgIncome -
+        avgExpense,
+    };
+  }, [
+    monthlyData,
+    s.totalFunds,
+  ]);
+
+  /* =========================================================
+     PRESCRIPTIVE INSIGHTS
   ========================================================= */
 
   const recommendations =
     useMemo(() => {
-      const actions: string[] = [];
+      const list: string[] = [];
 
-      if (s.expense > s.income) {
-        actions.push(
-          "Review discretionary expenses and introduce approval controls for high-value spending."
+      if (
+        s.pettyCashExpense >
+        s.bankExpense
+      ) {
+        list.push(
+          "Consider moving more high-value payments from petty cash to bank-based payments for stronger financial traceability."
         );
       }
 
       if (
-        s.totalFunds > 0 &&
-        s.pettyCash >
-          s.totalFunds * 0.4
+        currentMonth.expense >
+        currentMonth.income
       ) {
-        actions.push(
-          "Consider transferring excess petty cash back to the bank to improve financial control."
+        list.push(
+          "Review current month expenses and postpone non-essential expenditure until the cash-flow position improves."
+        );
+      }
+
+      if (s.pettyCash < 1000) {
+        list.push(
+          "Plan a controlled bank-to-petty-cash transfer to maintain operational liquidity."
         );
       }
 
       if (
-        prediction.projectedSurplus < 0
+        forecast.projectedFunds <
+        s.totalFunds
       ) {
-        actions.push(
-          "Prepare a cost-control plan because the current financial run-rate projects a monthly deficit."
+        list.push(
+          "Based on the recent spending pattern, GPCC funds may decline next month. Consider establishing an expense budget."
         );
       }
 
-      if (
-        analytics.expenseCategories[0] &&
-        s.expense > 0
-      ) {
-        const top =
-          analytics.expenseCategories[0];
-
-        const share =
-          (top.value / s.expense) * 100;
-
-        if (share > 35) {
-          actions.push(
-            `${top.name} represents approximately ${share.toFixed(
-              0
-            )}% of total expenses. Review this category for optimisation opportunities.`
-          );
-        }
-      }
-
-      if (!actions.length) {
-        actions.push(
-          "Maintain the current financial discipline and continue periodic reconciliation of Bank and Petty Cash."
-        );
-
-        actions.push(
-          "Use monthly trend analysis to detect changes in income and expenditure patterns early."
+      if (!list.length) {
+        list.push(
+          "Maintain the current financial discipline and continue monitoring income, expenditure and liquidity."
         );
       }
 
-      return actions;
+      return list;
     }, [
       s,
-      prediction,
-      analytics.expenseCategories,
+      currentMonth,
+      forecast,
     ]);
 
   /* =========================================================
-     SAVE OPENING BALANCES
-  ========================================================= */
-
-  const saveBankOpeningBalance =
-    async () => {
-      if (
-        !bankSetupForm.account_name.trim() ||
-        bankSetupForm.opening_balance === ""
-      ) {
-        setMsg(
-          "Please enter the bank account name and opening balance."
-        );
-
-        return;
-      }
-
-      const openingBalance = Number(
-        bankSetupForm.opening_balance
-      );
-
-      if (
-        Number.isNaN(openingBalance) ||
-        openingBalance < 0
-      ) {
-        setMsg(
-          "Please enter a valid bank opening balance."
-        );
-
-        return;
-      }
-
-      const { error } = await supabase
-        .from("bank_accounts")
-        .insert({
-          account_name:
-            bankSetupForm.account_name.trim(),
-          opening_balance:
-            openingBalance,
-          opening_balance_date:
-            bankSetupForm.opening_balance_date,
-          is_active: true,
-        });
-
-      if (error) {
-        setMsg(error.message);
-        return;
-      }
-
-      await loadDashboard();
-    };
-
-  const savePettyCashOpeningBalance =
-    async () => {
-      if (
-        !pettyCashSetupForm.account_name.trim() ||
-        pettyCashSetupForm.opening_balance === ""
-      ) {
-        setMsg(
-          "Please enter the petty cash account name and opening balance."
-        );
-
-        return;
-      }
-
-      const openingBalance = Number(
-        pettyCashSetupForm.opening_balance
-      );
-
-      if (
-        Number.isNaN(openingBalance) ||
-        openingBalance < 0
-      ) {
-        setMsg(
-          "Please enter a valid petty cash opening balance."
-        );
-
-        return;
-      }
-
-      const { error } = await supabase
-        .from("petty_cash_accounts")
-        .insert({
-          account_name:
-            pettyCashSetupForm.account_name.trim(),
-          opening_balance:
-            openingBalance,
-          opening_balance_date:
-            pettyCashSetupForm.opening_balance_date,
-          is_active: true,
-        });
-
-      if (error) {
-        setMsg(error.message);
-        return;
-      }
-
-      await loadDashboard();
-    };
-
-  /* =========================================================
-     LOADING
-  ========================================================= */
-
-  if (loading) {
-    return (
-      <div className="card">
-        <h2>
-          Loading Financial Intelligence Centre...
-        </h2>
-
-        <p className="muted">
-          Calculating financial position and
-          generating analytics...
-        </p>
-      </div>
-    );
-  }
-
-  /* =========================================================
-     INITIAL SETUP
-  ========================================================= */
-
-  if (!bankAccount || !pettyCashAccount) {
-    return (
-      <div>
-        <div className="pageHead">
-          <div>
-            <h1>
-              Initial Financial Setup
-            </h1>
-
-            <p className="muted">
-              Configure the GPCC Bank Account and
-              Petty Cash opening balances.
-            </p>
-          </div>
-        </div>
-
-        {msg && (
-          <div
-            className="card"
-            style={{
-              marginBottom: 20,
-              color: "#b42318",
-            }}
-          >
-            {msg}
-          </div>
-        )}
-
-        {!bankAccount && (
-          <div
-            className="card"
-            style={{
-              marginBottom: 20,
-            }}
-          >
-            <h2>
-              Set Opening Bank Balance
-            </h2>
-
-            <div className="formGrid">
-              <label>
-                Bank Account Name
-
-                <input
-                  className="input"
-                  value={
-                    bankSetupForm.account_name
-                  }
-                  onChange={(e) =>
-                    setBankSetupForm({
-                      ...bankSetupForm,
-                      account_name:
-                        e.target.value,
-                    })
-                  }
-                />
-              </label>
-
-              <label>
-                Opening Balance
-
-                <input
-                  className="input"
-                  type="number"
-                  min="0"
-                  value={
-                    bankSetupForm.opening_balance
-                  }
-                  onChange={(e) =>
-                    setBankSetupForm({
-                      ...bankSetupForm,
-                      opening_balance:
-                        e.target.value,
-                    })
-                  }
-                />
-              </label>
-
-              <label>
-                Balance As On Date
-
-                <input
-                  className="input"
-                  type="date"
-                  value={
-                    bankSetupForm.opening_balance_date
-                  }
-                  onChange={(e) =>
-                    setBankSetupForm({
-                      ...bankSetupForm,
-                      opening_balance_date:
-                        e.target.value,
-                    })
-                  }
-                />
-              </label>
-            </div>
-
-            <div
-              style={{
-                marginTop: 20,
-              }}
-            >
-              <button
-                className="btn"
-                onClick={
-                  saveBankOpeningBalance
-                }
-              >
-                Save Opening Bank Balance
-              </button>
-            </div>
-          </div>
-        )}
-
-        {!pettyCashAccount && (
-          <div className="card">
-            <h2>
-              Set Opening Petty Cash Balance
-            </h2>
-
-            <div className="formGrid">
-              <label>
-                Petty Cash Account Name
-
-                <input
-                  className="input"
-                  value={
-                    pettyCashSetupForm.account_name
-                  }
-                  onChange={(e) =>
-                    setPettyCashSetupForm({
-                      ...pettyCashSetupForm,
-                      account_name:
-                        e.target.value,
-                    })
-                  }
-                />
-              </label>
-
-              <label>
-                Opening Petty Cash Balance
-
-                <input
-                  className="input"
-                  type="number"
-                  min="0"
-                  value={
-                    pettyCashSetupForm.opening_balance
-                  }
-                  onChange={(e) =>
-                    setPettyCashSetupForm({
-                      ...pettyCashSetupForm,
-                      opening_balance:
-                        e.target.value,
-                    })
-                  }
-                />
-              </label>
-
-              <label>
-                Balance As On Date
-
-                <input
-                  className="input"
-                  type="date"
-                  value={
-                    pettyCashSetupForm.opening_balance_date
-                  }
-                  onChange={(e) =>
-                    setPettyCashSetupForm({
-                      ...pettyCashSetupForm,
-                      opening_balance_date:
-                        e.target.value,
-                    })
-                  }
-                />
-              </label>
-            </div>
-
-            <div
-              style={{
-                marginTop: 20,
-              }}
-            >
-              <button
-                className="btn"
-                onClick={
-                  savePettyCashOpeningBalance
-                }
-              >
-                Save Opening Petty Cash Balance
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  /* =========================================================
-     CHART DATA
+     ACCOUNT DISTRIBUTION
   ========================================================= */
 
   const fundDistribution = [
@@ -1321,49 +907,63 @@ export default function Dashboard() {
     },
   ];
 
-  const cashFlowData = [
-    {
-      name: "Bank Income",
-      value: s.bankIncome,
-    },
-    {
-      name: "Bank Expense",
-      value: s.bankExpense,
-    },
-    {
-      name: "Cash Income",
-      value: s.cashIncome,
-    },
-    {
-      name: "Cash Expense",
-      value: s.pettyCashExpense,
-    },
-  ];
+  /* =========================================================
+     LOADING
+  ========================================================= */
+
+  if (loading) {
+    return (
+      <div className="card">
+        <h2>
+          Loading GPCC Financial Intelligence...
+        </h2>
+      </div>
+    );
+  }
+
+  /* =========================================================
+     INITIAL SETUP MESSAGE
+  ========================================================= */
+
+  if (!bankAccount || !pettyCashAccount) {
+    return (
+      <div className="card">
+        <h2>
+          Financial Setup Required
+        </h2>
+
+        <p className="muted">
+          Please configure both the active Bank
+          Account and Petty Cash Account before
+          using the Financial Intelligence
+          Dashboard.
+        </p>
+      </div>
+    );
+  }
 
   /* =========================================================
      MAIN DASHBOARD
   ========================================================= */
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 24,
-        paddingBottom: 30,
-      }}
-    >
+    <div className="financeDashboard">
       {/* HEADER */}
 
-      <div className="pageHead">
+      <div className="pageHead dashboardHeader">
         <div>
+          <div className="dashboardEyebrow">
+            GPCC FINANCIAL INTELLIGENCE
+          </div>
+
           <h1>
-            Financial Intelligence Centre
+            Financial Command Centre
           </h1>
 
           <p className="muted">
-            GPCC • Financial Performance,
-            Intelligence & Control
+            Real-time financial position,
+            alerts, diagnostics, predictions
+            and recommended actions.
           </p>
         </div>
 
@@ -1371,290 +971,402 @@ export default function Dashboard() {
           className="btn secondary"
           onClick={loadDashboard}
         >
-          ↻ Refresh Intelligence
+          <RefreshCw size={16} />
+          Refresh Intelligence
         </button>
       </div>
 
       {msg && (
-        <div
-          className="card"
-          style={{
-            color: "#b42318",
-          }}
-        >
+        <div className="dashboardError">
           {msg}
         </div>
       )}
 
       {/* =====================================================
-         EXECUTIVE SUMMARY
-      ===================================================== */}
+          EXECUTIVE METRICS
+      ====================================================== */}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 18,
-        }}
-      >
-        <div className="card">
-          <div className="muted">
-            Total Available Funds
-          </div>
-
-          <div className="metric">
-            {money(s.totalFunds)}
-          </div>
-
-          <small className="muted">
-            Overall GPCC liquidity
-          </small>
-        </div>
-
-        <div className="card">
-          <div className="muted">
-            Current Bank Position
-          </div>
-
-          <div className="metric">
-            {money(s.bank)}
-          </div>
-
-          <small className="muted">
-            Primary controlled funds
-          </small>
-        </div>
-
-        <div className="card">
-          <div className="muted">
-            Current Petty Cash
-          </div>
-
-          <div className="metric">
-            {money(s.pettyCash)}
-          </div>
-
-          <small className="muted">
-            Operational cash available
-          </small>
-        </div>
-
-        <div className="card">
-          <div className="muted">
-            Total Income
-          </div>
-
-          <div className="metric">
-            {money(s.income)}
-          </div>
-
-          <small className="muted">
-            Cleared income
-          </small>
-        </div>
-
-        <div className="card">
-          <div className="muted">
-            Total Expense
-          </div>
-
-          <div className="metric">
-            {money(s.expense)}
-          </div>
-
-          <small className="muted">
-            Paid expenditure
-          </small>
-        </div>
-
-        <div className="card">
-          <div className="muted">
-            Net Surplus
-          </div>
-
-          <div className="metric">
-            {money(
-              s.income - s.expense
-            )}
-          </div>
-
-          <small className="muted">
-            Income minus expenditure
-          </small>
-        </div>
-      </div>
-
-      {/* =====================================================
-         FINANCIAL HEALTH + ALERTS
-      ===================================================== */}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "minmax(300px, 0.8fr) minmax(400px, 1.2fr)",
-          gap: 24,
-        }}
-      >
-        <div className="card">
-          <h3>
-            Financial Health Index
-          </h3>
-
-          <div
-            style={{
-              height: 280,
-            }}
-          >
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie
-                  data={[
-                    {
-                      name: "Health",
-                      value:
-                        financialHealth.score,
-                    },
-                    {
-                      name: "Remaining",
-                      value:
-                        100 -
-                        financialHealth.score,
-                    },
-                  ]}
-                  dataKey="value"
-                  innerRadius={75}
-                  outerRadius={105}
-                  startAngle={90}
-                  endAngle={-270}
-                >
-                  <Cell />
-                  <Cell />
-                </Pie>
-
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div
-            style={{
-              textAlign: "center",
-              marginTop: -165,
-              paddingBottom: 105,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 38,
-                fontWeight: 800,
-              }}
-            >
-              {financialHealth.score}
+      <section className="dashboardSection">
+        <div className="metricGrid">
+          <div className="smartMetricCard primaryMetric">
+            <div className="metricIcon">
+              <CircleDollarSign size={22} />
             </div>
 
-            <div className="muted">
-              {financialHealth.status}
+            <span>
+              Total Available Funds
+            </span>
+
+            <strong>
+              {money(s.totalFunds)}
+            </strong>
+
+            <small>
+              Current operational liquidity
+            </small>
+          </div>
+
+          <div className="smartMetricCard">
+            <div className="metricIcon">
+              <Landmark size={22} />
             </div>
+
+            <span>
+              Current Bank Position
+            </span>
+
+            <strong>
+              {money(s.bank)}
+            </strong>
+
+            <small>
+              {bankAccount.account_name}
+            </small>
           </div>
 
-          <p className="muted">
-            Health score evaluates fund
-            availability, surplus position,
-            account balance risk and cash
-            concentration.
-          </p>
-        </div>
+          <div className="smartMetricCard">
+            <div className="metricIcon">
+              <Wallet size={22} />
+            </div>
 
-        <div className="card">
-          <h3>
-            Smart Financial Notifications
-          </h3>
+            <span>
+              Current Petty Cash
+            </span>
 
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-              marginTop: 18,
-            }}
-          >
-            {notifications.map(
-              (notification) => (
-                <div
-                  key={notification.id}
-                  style={{
-                    padding: 16,
-                    borderRadius: 12,
-                    border:
-                      "1px solid rgba(0,0,0,0.08)",
-                  }}
-                >
-                  <strong>
-                    {notification.level ===
-                      "critical" && "🔴 "}
-                    {notification.level ===
-                      "warning" && "🟡 "}
-                    {notification.level ===
-                      "success" && "🟢 "}
-                    {notification.level ===
-                      "info" && "🔵 "}
+            <strong>
+              {money(s.pettyCash)}
+            </strong>
 
-                    {notification.title}
-                  </strong>
+            <small>
+              Available for operations
+            </small>
+          </div>
 
-                  <div
-                    className="muted"
-                    style={{
-                      marginTop: 6,
-                    }}
-                  >
-                    {notification.message}
-                  </div>
-                </div>
-              )
-            )}
+          <div className="smartMetricCard">
+            <div className="metricIcon">
+              {currentMonth.net >= 0 ? (
+                <TrendingUp size={22} />
+              ) : (
+                <TrendingDown size={22} />
+              )}
+            </div>
+
+            <span>
+              Current Month Net Flow
+            </span>
+
+            <strong>
+              {money(currentMonth.net)}
+            </strong>
+
+            <small>
+              Income minus expenditure
+            </small>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* =====================================================
-         TREND + FUND DISTRIBUTION
-      ===================================================== */}
+          SMART NOTIFICATIONS
+      ====================================================== */}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "minmax(0, 1.6fr) minmax(320px, 0.8fr)",
-          gap: 24,
-        }}
-      >
-        <div className="card">
-          <h3>
-            Income vs Expense Trend
-          </h3>
+      <section className="dashboardSection">
+        <div className="sectionTitleRow">
+          <div>
+            <div className="sectionEyebrow">
+              LIVE MONITORING
+            </div>
 
-          <p className="muted">
-            Historical financial movement based
-            on recorded transactions.
-          </p>
+            <h2>
+              Smart Notifications
+            </h2>
+          </div>
 
-          <div
-            style={{
-              height: 380,
-              marginTop: 20,
-            }}
-          >
-            <ResponsiveContainer>
-              <AreaChart
-                data={
-                  analytics.trendData
-                }
+          <Bell size={22} />
+        </div>
+
+        <div className="notificationGrid">
+          {alerts.map(
+            (alert, index) => (
+              <div
+                key={index}
+                className={`notificationCard ${alert.type}`}
               >
+                <div className="notificationIcon">
+                  {alert.type ===
+                    "danger" && (
+                    <AlertTriangle />
+                  )}
+
+                  {alert.type ===
+                    "warning" && (
+                    <AlertTriangle />
+                  )}
+
+                  {alert.type ===
+                    "success" && (
+                    <ShieldCheck />
+                  )}
+
+                  {alert.type ===
+                    "info" && (
+                    <Bell />
+                  )}
+                </div>
+
+                <div>
+                  <h4>
+                    {alert.title}
+                  </h4>
+
+                  <p>
+                    {alert.description}
+                  </p>
+                </div>
+              </div>
+            )
+          )}
+        </div>
+      </section>
+
+      {/* =====================================================
+          HEALTH + FORECAST
+      ====================================================== */}
+
+      <section className="dashboardTwoColumn">
+        {/* HEALTH */}
+
+        <div className="intelligenceCard healthCard">
+          <div className="sectionEyebrow">
+            FINANCIAL HEALTH
+          </div>
+
+          <h2>
+            GPCC Financial Health Score
+          </h2>
+
+          <div className="healthContent">
+            <div className="healthScore">
+              <strong>
+                {health.score}
+              </strong>
+
+              <span>/ 100</span>
+            </div>
+
+            <div>
+              <h3>
+                {health.label}
+              </h3>
+
+              <p className="muted">
+                Calculated using liquidity,
+                cash-flow stability and
+                financial risk indicators.
+              </p>
+            </div>
+          </div>
+
+          <div className="healthBars">
+            <div>
+              <span>
+                Liquidity
+              </span>
+
+              <div className="progressTrack">
+                <div
+                  className="progressFill"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      s.totalFunds > 0
+                        ? 85
+                        : 10
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <span>
+                Cash Flow
+              </span>
+
+              <div className="progressTrack">
+                <div
+                  className="progressFill"
+                  style={{
+                    width: `${Math.max(
+                      10,
+                      Math.min(
+                        100,
+                        currentMonth.net >= 0
+                          ? 85
+                          : 35
+                      )
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <span>
+                Expense Control
+              </span>
+
+              <div className="progressTrack">
+                <div
+                  className="progressFill"
+                  style={{
+                    width: `${
+                      currentMonth.income > 0
+                        ? Math.min(
+                            100,
+                            Math.max(
+                              20,
+                              100 -
+                                (currentMonth
+                                  .expense /
+                                  currentMonth
+                                    .income) *
+                                  50
+                            )
+                          )
+                        : 50
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* FORECAST */}
+
+        <div className="intelligenceCard forecastCard">
+          <div className="sectionEyebrow">
+            PREDICTIVE ANALYSIS
+          </div>
+
+          <h2>
+            Next 30-Day Outlook
+          </h2>
+
+          <div className="forecastMetrics">
+            <div>
+              <span>
+                Projected Income
+              </span>
+
+              <strong>
+                {money(
+                  forecast.projectedIncome
+                )}
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                Projected Expense
+              </span>
+
+              <strong>
+                {money(
+                  forecast.projectedExpense
+                )}
+              </strong>
+            </div>
+
+            <div className="forecastHighlight">
+              <span>
+                Estimated Fund Position
+              </span>
+
+              <strong>
+                {money(
+                  forecast.projectedFunds
+                )}
+              </strong>
+            </div>
+          </div>
+
+          <p className="forecastNote">
+            Projection is calculated from the
+            available recent monthly financial
+            pattern.
+          </p>
+        </div>
+      </section>
+
+      {/* =====================================================
+          CASH FLOW + FUND DISTRIBUTION
+      ====================================================== */}
+
+      <section className="dashboardChartGrid">
+        <div className="chartCard largeChart">
+          <div className="sectionEyebrow">
+            OPERATING TREND
+          </div>
+
+          <h2>
+            Recent Cash Flow Pattern
+          </h2>
+
+          <div className="chartLarge">
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+            >
+              <AreaChart
+                data={monthlyData}
+              >
+                <defs>
+                  <linearGradient
+                    id="incomeGradient"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop
+                      offset="5%"
+                      stopColor="#10b981"
+                      stopOpacity={0.35}
+                    />
+
+                    <stop
+                      offset="95%"
+                      stopColor="#10b981"
+                      stopOpacity={0}
+                    />
+                  </linearGradient>
+
+                  <linearGradient
+                    id="expenseGradient"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop
+                      offset="5%"
+                      stopColor="#ef4444"
+                      stopOpacity={0.25}
+                    />
+
+                    <stop
+                      offset="95%"
+                      stopColor="#ef4444"
+                      stopOpacity={0}
+                    />
+                  </linearGradient>
+                </defs>
+
                 <CartesianGrid
                   strokeDasharray="3 3"
+                  vertical={false}
                 />
 
                 <XAxis
@@ -1666,764 +1378,286 @@ export default function Dashboard() {
                 <Tooltip
                   formatter={(value) =>
                     money(
-                      Number(value)
+                      Number(value || 0)
                     )
                   }
                 />
 
-                <Legend />
-
                 <Area
                   type="monotone"
                   dataKey="income"
-                  name="Income"
-                  fillOpacity={0.25}
+                  stroke="#10b981"
+                  strokeWidth={3}
+                  fill="url(#incomeGradient)"
                 />
 
                 <Area
                   type="monotone"
                   dataKey="expense"
-                  name="Expense"
-                  fillOpacity={0.25}
+                  stroke="#ef4444"
+                  strokeWidth={3}
+                  fill="url(#expenseGradient)"
                 />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="card">
-          <h3>
+        <div className="chartCard">
+          <div className="sectionEyebrow">
+            LIQUIDITY
+          </div>
+
+          <h2>
             Fund Distribution
-          </h3>
+          </h2>
 
-          <p className="muted">
-            Current allocation of GPCC funds.
-          </p>
-
-          <div
-            style={{
-              height: 300,
-            }}
-          >
-            <ResponsiveContainer>
+          <div className="chartMedium">
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+            >
               <PieChart>
                 <Pie
-                  data={
-                    fundDistribution
-                  }
+                  data={fundDistribution}
                   dataKey="value"
                   nameKey="name"
                   innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={4}
-                />
+                  outerRadius={95}
+                  paddingAngle={5}
+                >
+                  {fundDistribution.map(
+                    (_, index) => (
+                      <Cell
+                        key={index}
+                        fill={
+                          index === 0
+                            ? "#6366f1"
+                            : "#f59e0b"
+                        }
+                      />
+                    )
+                  )}
+                </Pie>
 
                 <Tooltip
                   formatter={(value) =>
                     money(
-                      Number(value)
+                      Number(value || 0)
                     )
                   }
                 />
-
-                <Legend />
               </PieChart>
             </ResponsiveContainer>
           </div>
 
-          <div
-            style={{
-              textAlign: "center",
-              marginTop: 10,
-            }}
-          >
+          <div className="distributionLegend">
+            <span>
+              <i className="legendBank" />
+              Bank
+            </span>
+
+            <span>
+              <i className="legendCash" />
+              Petty Cash
+            </span>
+          </div>
+        </div>
+      </section>
+
+      {/* =====================================================
+          DIAGNOSTIC ANALYSIS
+      ====================================================== */}
+
+      <section className="dashboardSection">
+        <div className="sectionTitleRow">
+          <div>
+            <div className="sectionEyebrow">
+              DIAGNOSTIC ANALYSIS
+            </div>
+
+            <h2>
+              What Is Driving the Financial Position?
+            </h2>
+          </div>
+
+          <Brain size={24} />
+        </div>
+
+        <div className="diagnosticGrid">
+          <div className="diagnosticCard">
+            <span>
+              Income
+            </span>
+
             <strong>
-              {money(s.totalFunds)}
+              {money(s.income)}
             </strong>
 
-            <div className="muted">
-              Total GPCC Funds
-            </div>
+            <p>
+              Total cleared income currently
+              recorded in the financial system.
+            </p>
           </div>
-        </div>
-      </div>
 
-      {/* =====================================================
-         EXPENSE INTELLIGENCE
-      ===================================================== */}
+          <div className="diagnosticCard">
+            <span>
+              Gross Expense
+            </span>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "minmax(0, 1.4fr) minmax(320px, 0.9fr)",
-          gap: 24,
-        }}
-      >
-        <div className="card">
-          <h3>
-            Expense Intelligence
-          </h3>
-
-          <p className="muted">
-            Highest spending categories.
-          </p>
-
-          <div
-            style={{
-              height: 380,
-              marginTop: 20,
-            }}
-          >
-            <ResponsiveContainer>
-              <BarChart
-                data={
-                  analytics.expenseCategories
-                }
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                />
-
-                <XAxis
-                  dataKey="name"
-                />
-
-                <YAxis />
-
-                <Tooltip
-                  formatter={(value) =>
-                    money(
-                      Number(value)
-                    )
-                  }
-                />
-
-                <Bar
-                  dataKey="value"
-                  name="Expense"
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="card">
-          <h3>
-            Top Expense Drivers
-          </h3>
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-              marginTop: 20,
-            }}
-          >
-            {analytics.largestExpenses
-              .length === 0 && (
-              <p className="muted">
-                No expense data available.
-              </p>
-            )}
-
-            {analytics.largestExpenses.map(
-              (row, index) => (
-                <div
-                  key={
-                    row.id || index
-                  }
-                  style={{
-                    paddingBottom: 14,
-                    borderBottom:
-                      "1px solid rgba(0,0,0,0.08)",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent:
-                        "space-between",
-                      gap: 10,
-                    }}
-                  >
-                    <strong>
-                      {row.category ||
-                        row.expense_category ||
-                        row.vendor ||
-                        "Expense"}
-                    </strong>
-
-                    <strong>
-                      {money(
-                        Number(
-                          row.gross_amount ||
-                            0
-                        )
-                      )}
-                    </strong>
-                  </div>
-
-                  <div className="muted">
-                    {row.vendor ||
-                      row.description ||
-                      "Recorded expense"}
-                  </div>
-                </div>
-              )
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* =====================================================
-         CASH FLOW
-      ===================================================== */}
-
-      <div className="card">
-        <h3>
-          Financial Flow Analysis
-        </h3>
-
-        <p className="muted">
-          Comparison of income and expenditure
-          across Bank and Petty Cash.
-        </p>
-
-        <div
-          style={{
-            height: 380,
-            marginTop: 20,
-          }}
-        >
-          <ResponsiveContainer>
-            <BarChart
-              data={cashFlowData}
-            >
-              <CartesianGrid
-                strokeDasharray="3 3"
-              />
-
-              <XAxis
-                dataKey="name"
-              />
-
-              <YAxis />
-
-              <Tooltip
-                formatter={(value) =>
-                  money(
-                    Number(value)
-                  )
-                }
-              />
-
-              <Bar
-                dataKey="value"
-                name="Amount"
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* =====================================================
-         FOUR LAYERS OF ANALYTICS
-      ===================================================== */}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: 20,
-        }}
-      >
-        <div className="card">
-          <h3>
-            📊 Descriptive
-          </h3>
-
-          <p className="muted">
-            What has happened?
-          </p>
-
-          <ul
-            style={{
-              paddingLeft: 20,
-              lineHeight: 1.9,
-            }}
-          >
-            <li>
-              Total Income:{" "}
-              {money(s.income)}
-            </li>
-
-            <li>
-              Total Expense:{" "}
+            <strong>
               {money(s.expense)}
-            </li>
+            </strong>
 
-            <li>
-              TDS Recorded:{" "}
+            <p>
+              Includes all paid expenses before
+              TDS adjustment.
+            </p>
+          </div>
+
+          <div className="diagnosticCard">
+            <span>
+              TDS Impact
+            </span>
+
+            <strong>
               {money(s.tds)}
-            </li>
+            </strong>
 
-            <li>
-              Net Surplus:{" "}
+            <p>
+              TDS reduces immediate payment
+              outflow but remains a financial
+              liability.
+            </p>
+          </div>
+
+          <div className="diagnosticCard">
+            <span>
+              Internal Transfers
+            </span>
+
+            <strong>
               {money(
-                s.income -
-                  s.expense
+                s.bankToPettyCash +
+                  s.pettyCashToBank
               )}
-            </li>
-          </ul>
-        </div>
+            </strong>
 
-        <div className="card">
-          <h3>
-            🔎 Diagnostic
-          </h3>
-
-          <p className="muted">
-            Why is it happening?
-          </p>
-
-          <ul
-            style={{
-              paddingLeft: 20,
-              lineHeight: 1.9,
-            }}
-          >
-            <li>
-              Bank Expense:{" "}
-              {money(
-                s.bankExpense
-              )}
-            </li>
-
-            <li>
-              Petty Cash Expense:{" "}
-              {money(
-                s.pettyCashExpense
-              )}
-            </li>
-
-            <li>
-              Largest expense categories are
-              highlighted in Expense
-              Intelligence.
-            </li>
-          </ul>
-        </div>
-
-        <div className="card">
-          <h3>
-            🔮 Predictive
-          </h3>
-
-          <p className="muted">
-            What may happen next?
-          </p>
-
-          <ul
-            style={{
-              paddingLeft: 20,
-              lineHeight: 1.9,
-            }}
-          >
-            <li>
-              Avg Income Run-rate:{" "}
-              {money(
-                prediction.avgIncome
-              )}
-            </li>
-
-            <li>
-              Avg Expense Run-rate:{" "}
-              {money(
-                prediction.avgExpense
-              )}
-            </li>
-
-            <li>
-              Projected Surplus:{" "}
-              {money(
-                prediction.projectedSurplus
-              )}
-            </li>
-          </ul>
-        </div>
-
-        <div className="card">
-          <h3>
-            💡 Prescriptive
-          </h3>
-
-          <p className="muted">
-            What should GPCC do?
-          </p>
-
-          <ul
-            style={{
-              paddingLeft: 20,
-              lineHeight: 1.8,
-            }}
-          >
-            {recommendations
-              .slice(0, 3)
-              .map(
-                (
-                  recommendation,
-                  index
-                ) => (
-                  <li key={index}>
-                    {recommendation}
-                  </li>
-                )
-              )}
-          </ul>
-        </div>
-      </div>
-
-      {/* =====================================================
-         PREDICTIVE TREND
-      ===================================================== */}
-
-      <div className="card">
-        <h3>
-          Surplus / Deficit Movement
-        </h3>
-
-        <p className="muted">
-          Monthly financial performance
-          trajectory.
-        </p>
-
-        <div
-          style={{
-            height: 350,
-            marginTop: 20,
-          }}
-        >
-          <ResponsiveContainer>
-            <LineChart
-              data={
-                analytics.trendData
-              }
-            >
-              <CartesianGrid
-                strokeDasharray="3 3"
-              />
-
-              <XAxis
-                dataKey="month"
-              />
-
-              <YAxis />
-
-              <Tooltip
-                formatter={(value) =>
-                  money(
-                    Number(value)
-                  )
-                }
-              />
-
-              <Line
-                type="monotone"
-                dataKey="surplus"
-                name="Surplus / Deficit"
-                strokeWidth={3}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* =====================================================
-         RECONCILIATION
-      ===================================================== */}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(450px, 1fr))",
-          gap: 24,
-        }}
-      >
-        <div className="card">
-          <h3>
-            Bank Reconciliation
-          </h3>
-
-          <div className="tableWrap">
-            <table className="table">
-              <tbody>
-                <tr>
-                  <td>
-                    Opening Bank Balance
-                  </td>
-                  <td>
-                    {money(
-                      bankAccount.opening_balance
-                    )}
-                  </td>
-                </tr>
-
-                <tr>
-                  <td>
-                    + Cleared Bank Income
-                  </td>
-                  <td>
-                    {money(
-                      s.bankIncome
-                    )}
-                  </td>
-                </tr>
-
-                <tr>
-                  <td>
-                    - Paid Bank Expenses
-                  </td>
-                  <td>
-                    {money(
-                      s.bankExpense
-                    )}
-                  </td>
-                </tr>
-
-                <tr>
-                  <td>
-                    - Bank → Petty Cash
-                  </td>
-                  <td>
-                    {money(
-                      s.bankToPettyCash
-                    )}
-                  </td>
-                </tr>
-
-                <tr>
-                  <td>
-                    + Petty Cash → Bank
-                  </td>
-                  <td>
-                    {money(
-                      s.pettyCashToBank
-                    )}
-                  </td>
-                </tr>
-
-                <tr>
-                  <td>
-                    + Bank Adjustment Credit
-                  </td>
-                  <td>
-                    {money(
-                      s.bankAdjustmentCredit
-                    )}
-                  </td>
-                </tr>
-
-                <tr>
-                  <td>
-                    - Bank Adjustment Debit
-                  </td>
-                  <td>
-                    {money(
-                      s.bankAdjustmentDebit
-                    )}
-                  </td>
-                </tr>
-
-                <tr>
-                  <th>
-                    Current Bank Position
-                  </th>
-                  <th>
-                    {money(s.bank)}
-                  </th>
-                </tr>
-              </tbody>
-            </table>
+            <p>
+              Transfers change fund location but
+              do not change total GPCC funds.
+            </p>
           </div>
         </div>
+      </section>
 
-        <div className="card">
-          <h3>
-            Petty Cash Reconciliation
-          </h3>
+      {/* =====================================================
+          PRESCRIPTIVE ANALYSIS
+      ====================================================== */}
 
-          <div className="tableWrap">
-            <table className="table">
-              <tbody>
-                <tr>
-                  <td>
-                    Opening Petty Cash
-                  </td>
-                  <td>
-                    {money(
-                      pettyCashAccount.opening_balance
-                    )}
-                  </td>
-                </tr>
+      <section className="recommendationSection">
+        <div className="sectionTitleRow">
+          <div>
+            <div className="sectionEyebrow">
+              PRESCRIPTIVE ANALYSIS
+            </div>
 
-                <tr>
-                  <td>
-                    + Cleared Cash Income
-                  </td>
-                  <td>
-                    {money(
-                      s.cashIncome
-                    )}
-                  </td>
-                </tr>
+            <h2>
+              Recommended Actions
+            </h2>
+          </div>
 
-                <tr>
-                  <td>
-                    + Bank → Petty Cash
-                  </td>
-                  <td>
-                    {money(
-                      s.bankToPettyCash
-                    )}
-                  </td>
-                </tr>
+          <Lightbulb size={24} />
+        </div>
 
-                <tr>
-                  <td>
-                    - Paid Petty Cash Expenses
-                  </td>
-                  <td>
-                    {money(
-                      s.pettyCashExpense
-                    )}
-                  </td>
-                </tr>
+        <div className="recommendationGrid">
+          {recommendations.map(
+            (
+              recommendation,
+              index
+            ) => (
+              <div
+                className="recommendationCard"
+                key={index}
+              >
+                <div className="recommendationNumber">
+                  {String(
+                    index + 1
+                  ).padStart(2, "0")}
+                </div>
 
-                <tr>
-                  <td>
-                    - Petty Cash → Bank
-                  </td>
-                  <td>
-                    {money(
-                      s.pettyCashToBank
-                    )}
-                  </td>
-                </tr>
+                <p>
+                  {recommendation}
+                </p>
+              </div>
+            )
+          )}
+        </div>
+      </section>
 
-                <tr>
-                  <td>
-                    + Cash Adjustment Credit
-                  </td>
-                  <td>
-                    {money(
-                      s.cashAdjustmentCredit
-                    )}
-                  </td>
-                </tr>
+      {/* =====================================================
+          CURRENT MONTH SUMMARY
+      ====================================================== */}
 
-                <tr>
-                  <td>
-                    - Cash Adjustment Debit
-                  </td>
-                  <td>
-                    {money(
-                      s.cashAdjustmentDebit
-                    )}
-                  </td>
-                </tr>
+      <section className="currentMonthSection">
+        <div className="sectionEyebrow">
+          CURRENT PERIOD
+        </div>
 
-                <tr>
-                  <th>
-                    Current Petty Cash
-                  </th>
-                  <th>
-                    {money(s.pettyCash)}
-                  </th>
-                </tr>
-              </tbody>
-            </table>
+        <h2>
+          This Month at a Glance
+        </h2>
+
+        <div className="monthSummaryGrid">
+          <div>
+            <span>
+              Income
+            </span>
+
+            <strong>
+              {money(
+                currentMonth.income
+              )}
+            </strong>
+
+            <ArrowUpRight
+              size={20}
+            />
+          </div>
+
+          <div>
+            <span>
+              Expense
+            </span>
+
+            <strong>
+              {money(
+                currentMonth.expense
+              )}
+            </strong>
+
+            <ArrowDownRight
+              size={20}
+            />
+          </div>
+
+          <div>
+            <span>
+              Net Cash Flow
+            </span>
+
+            <strong>
+              {money(
+                currentMonth.net
+              )}
+            </strong>
+
+            <TrendingUp
+              size={20}
+            />
           </div>
         </div>
-      </div>
-
-      {/* =====================================================
-         FINAL FINANCIAL POSITION
-      ===================================================== */}
-
-      <div className="card">
-        <h3>
-          GPCC Consolidated Financial Position
-        </h3>
-
-        <div className="tableWrap">
-          <table className="table">
-            <tbody>
-              <tr>
-                <td>
-                  Current Bank Position
-                </td>
-
-                <td>
-                  {money(s.bank)}
-                </td>
-              </tr>
-
-              <tr>
-                <td>
-                  Current Petty Cash
-                </td>
-
-                <td>
-                  {money(s.pettyCash)}
-                </td>
-              </tr>
-
-              <tr>
-                <th>
-                  Total Available GPCC Funds
-                </th>
-
-                <th>
-                  {money(s.totalFunds)}
-                </th>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* =====================================================
-         FINANCIAL CONTROL NOTES
-      ===================================================== */}
-
-      <div className="card">
-        <h3>
-          Financial Intelligence & Control
-        </h3>
-
-        <p className="muted">
-          The dashboard combines transactional
-          financial data with descriptive,
-          diagnostic, predictive and prescriptive
-          analysis.
-        </p>
-
-        <p className="muted">
-          Internal transfers between Bank and
-          Petty Cash do not affect total GPCC
-          funds. They only change the location
-          of available funds.
-        </p>
-
-        <p className="muted">
-          Current Bank Position + Current Petty
-          Cash = Total Available GPCC Funds.
-        </p>
-      </div>
+      </section>
     </div>
   );
 }
