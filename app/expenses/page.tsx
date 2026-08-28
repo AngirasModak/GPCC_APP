@@ -1,479 +1,657 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  BadgeIndianRupee,
-  ReceiptText,
-  RefreshCw,
-  Scale,
-} from "lucide-react";
-
+import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-import FinancePageHeader from "../../components/finance/FinancePageHeader";
-import FinanceMetricCard from "../../components/finance/FinanceMetricCard";
-import BalanceHero from "../../components/finance/BalanceHero";
-import FinancialSummary from "../../components/finance/FinancialSummary";
-import ActivityTimeline from "../../components/finance/ActivityTimeline";
-import InsightCard from "../../components/finance/InsightCard";
-import DataToolbar from "../../components/finance/DataToolbar";
-import TransactionTable from "../../components/finance/TransactionTable";
-import StatusBadge from "../../components/finance/StatusBadge";
+type Expense = {
+  id: string;
+  date: string;
+  requisition_no: string;
+  vendor: string;
+  bill_no: string;
+  bill_date: string;
+  payment_mode: string;
+  cheque_or_utr: string;
+  payment_date: string;
+  gross_amount: number;
+  tds_rate: number;
+  tds_amount: number;
+  net_amount: number;
+  category: string;
+  remarks: string;
+  status: string;
+};
 
-const money = (value: number) =>
+const blank = {
+  date: new Date().toISOString().slice(0, 10),
+  requisition_no: "",
+  vendor: "",
+  bill_no: "",
+  bill_date: "",
+  payment_mode: "Bank Transfer",
+  cheque_or_utr: "",
+  payment_date: "",
+  gross_amount: "",
+  tds_rate: "0",
+  category: "",
+  remarks: "",
+  status: "Paid",
+};
+
+const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(Number(value || 0));
-
-const normalize = (value: unknown) =>
-  String(value || "").trim().toLowerCase();
-
-const getTds = (row: any) => {
-  if (
-    row.tds_amount !== null &&
-    row.tds_amount !== undefined
-  ) {
-    return Number(row.tds_amount || 0);
-  }
-
-  return (
-    Number(row.gross_amount || 0) *
-    (Number(row.tds_rate || 0) / 100)
-  );
-};
-
-const getNet = (row: any) => {
-  if (
-    row.net_amount !== null &&
-    row.net_amount !== undefined
-  ) {
-    return Number(row.net_amount || 0);
-  }
-
-  return (
-    Number(row.gross_amount || 0) -
-    getTds(row)
-  );
-};
+    maximumFractionDigits: 2,
+  }).format(Number(n || 0));
 
 export default function ExpensesPage() {
-  const [loading, setLoading] = useState(true);
-  const [expenses, setExpenses] =
-    useState<any[]>([]);
-  const [search, setSearch] = useState("");
+  const [rows, setRows] = useState<Expense[]>([]);
+  const [form, setForm] = useState<any>(blank);
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
 
-  const loadData = async () => {
-    setLoading(true);
+  const load = async () => {
     setMsg("");
 
-    try {
-      const { data, error } =
-        await supabase
-          .from("expenses")
-          .select("*")
-          .is("deleted_at", null)
-          .order("created_at", {
-            ascending: false,
-          });
+    const { data, error } = await supabase
+      .from("expenses")
+      .select("*")
+      .is("deleted_at", null)
+      .order("date", { ascending: false });
 
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      setExpenses(data || []);
-    } catch (error: any) {
-      setMsg(
-        error?.message ||
-          "Unable to load expense data."
-      );
-    } finally {
-      setLoading(false);
+    if (error) {
+      setMsg(error.message);
+    } else {
+      setRows((data || []) as Expense[]);
     }
   };
 
   useEffect(() => {
-    loadData();
+    load();
   }, []);
 
-  const summary = useMemo(() => {
-    const paid = expenses.filter(
-      (row) =>
-        normalize(row.status) === "paid"
-    );
+  const gross = Number(form.gross_amount || 0);
+  const rate = Number(form.tds_rate || 0);
 
-    const gross = paid.reduce(
-      (sum, row) =>
-        sum +
-        Number(row.gross_amount || 0),
-      0
-    );
+  const tdsAmount = gross * rate / 100;
+  const netAmount = gross - tdsAmount;
 
-    const tds = paid.reduce(
-      (sum, row) =>
-        sum + getTds(row),
-      0
-    );
-
-    const net = paid.reduce(
-      (sum, row) =>
-        sum + getNet(row),
-      0
-    );
-
-    const bankExpense = paid
-      .filter(
-        (row) =>
-          normalize(row.payment_mode) !==
-          "petty cash"
-      )
-      .reduce(
-        (sum, row) =>
-          sum + getNet(row),
-        0
+  const save = async () => {
+    if (
+      !form.requisition_no ||
+      !form.vendor ||
+      !form.gross_amount
+    ) {
+      setMsg(
+        "Requisition Number, Vendor and Gross Amount are required."
       );
+      return;
+    }
 
-    const pettyCashExpense = paid
-      .filter(
-        (row) =>
-          normalize(row.payment_mode) ===
-          "petty cash"
-      )
-      .reduce(
-        (sum, row) =>
-          sum + getNet(row),
-        0
-      );
+    if (gross <= 0) {
+      setMsg("Gross Amount must be greater than zero.");
+      return;
+    }
 
-    const pending = expenses
-      .filter(
-        (row) =>
-          normalize(row.status) !== "paid"
-      )
-      .reduce(
-        (sum, row) =>
-          sum +
-          Number(row.gross_amount || 0),
-        0
-      );
+    if (rate < 0 || rate > 100) {
+      setMsg("TDS Rate must be between 0 and 100.");
+      return;
+    }
 
-    return {
-      gross,
-      tds,
-      net,
-      bankExpense,
-      pettyCashExpense,
-      pending,
-      count: paid.length,
+    const payload = {
+      date: form.date,
+      requisition_no: form.requisition_no.trim(),
+      vendor: form.vendor.trim(),
+      bill_no: form.bill_no.trim() || null,
+      bill_date: form.bill_date || null,
+      payment_mode: form.payment_mode,
+      cheque_or_utr: form.cheque_or_utr.trim() || null,
+      payment_date: form.payment_date || null,
+      gross_amount: gross,
+      tds_rate: rate,
+      tds_amount: tdsAmount,
+      net_amount: netAmount,
+      category: form.category.trim() || null,
+      remarks: form.remarks.trim() || null,
+      status: form.status,
     };
-  }, [expenses]);
 
-  const filteredExpenses =
-    expenses.filter((row) =>
-      [
-        row.voucher_no,
-        row.vendor_name,
-        row.particulars,
-        row.description,
-        row.payment_mode,
-        row.status,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(search.toLowerCase())
+    let error: any;
+
+    if (editing) {
+      ({ error } = await supabase
+        .from("expenses")
+        .update(payload)
+        .eq("id", editing));
+    } else {
+      ({ error } = await supabase
+        .from("expenses")
+        .insert(payload));
+    }
+
+    if (error) {
+      setMsg(error.message);
+      return;
+    }
+
+    setOpen(false);
+    setEditing(null);
+    setForm(blank);
+    setMsg("");
+
+    load();
+  };
+
+  const edit = (r: Expense) => {
+    setEditing(r.id);
+
+    setForm({
+      ...r,
+      gross_amount: String(r.gross_amount),
+      tds_rate: String(r.tds_rate),
+      bill_date: r.bill_date || "",
+      payment_date: r.payment_date || "",
+    });
+
+    setOpen(true);
+  };
+
+  const del = async (id: string) => {
+    if (!confirm("Delete this expenditure entry?")) return;
+
+    const { error } = await supabase
+      .from("expenses")
+      .update({
+        deleted_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (error) {
+      setMsg(error.message);
+    } else {
+      load();
+    }
+  };
+
+  const paidRows = rows.filter(
+    (r) => String(r.status).toLowerCase() === "paid"
+  );
+
+  const totalGross = paidRows.reduce(
+    (sum, r) => sum + Number(r.gross_amount || 0),
+    0
+  );
+
+  const totalTds = paidRows.reduce(
+    (sum, r) => sum + Number(r.tds_amount || 0),
+    0
+  );
+
+  const totalNet = paidRows.reduce(
+    (sum, r) => sum + Number(r.net_amount || 0),
+    0
+  );
+
+  const pettyCashExpense = paidRows
+    .filter(
+      (r) =>
+        String(r.payment_mode).toLowerCase() ===
+        "petty cash"
+    )
+    .reduce(
+      (sum, r) => sum + Number(r.net_amount || 0),
+      0
     );
 
-  if (loading) {
-    return (
-      <div className="finance-loading">
-        Loading expenditure...
-      </div>
+  const bankExpense = paidRows
+    .filter(
+      (r) =>
+        String(r.payment_mode).toLowerCase() !==
+        "petty cash"
+    )
+    .reduce(
+      (sum, r) => sum + Number(r.net_amount || 0),
+      0
     );
-  }
 
   return (
-    <main className="finance-page">
-      <FinancePageHeader
-        eyebrow="GPCC FINANCIAL OPERATIONS"
-        title="Expenditure & TDS"
-        description="Monitor approved expenditure, payment outflow and TDS obligations."
-        badge={
-          <StatusBadge
-            status={`${summary.count} Paid`}
-            variant="success"
-          />
-        }
-        action={
-          <button
-            className="finance-button finance-button--secondary"
-            onClick={loadData}
-          >
-            <RefreshCw size={17} />
-            Refresh
-          </button>
-        }
-      />
+    <div>
+      <div className="pageHead">
+        <div>
+          <h1>Expenditure & TDS</h1>
+
+          <p className="muted">
+            Paid expenses automatically reduce the
+            selected fund: Bank or Petty Cash.
+          </p>
+        </div>
+
+        <button
+          className="btn"
+          onClick={() => {
+            setEditing(null);
+            setForm(blank);
+            setOpen(true);
+          }}
+        >
+          + Add Expenditure
+        </button>
+      </div>
+
+      <div
+        className="grid"
+        style={{ marginBottom: 20 }}
+      >
+        <div className="card">
+          <div className="muted">
+            Paid Gross Expenditure
+          </div>
+
+          <div className="metric">
+            {money(totalGross)}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Total TDS
+          </div>
+
+          <div className="metric">
+            {money(totalTds)}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Bank Paid
+          </div>
+
+          <div className="metric">
+            {money(bankExpense)}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Petty Cash Paid
+          </div>
+
+          <div className="metric">
+            {money(pettyCashExpense)}
+          </div>
+        </div>
+      </div>
 
       {msg && (
-        <div className="finance-alert finance-alert--danger">
+        <div
+          className="card"
+          style={{
+            marginBottom: 14,
+            color: "#b42318",
+          }}
+        >
           {msg}
         </div>
       )}
 
-      <section className="finance-metrics-grid">
-        <FinanceMetricCard
-          label="Gross Expenditure"
-          value={money(summary.gross)}
-          description="Total approved paid expense"
-          icon={<ReceiptText size={20} />}
-          accent="red"
-        />
+      <div className="card tableWrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Req. No.</th>
+              <th>In favour of M/S</th>
+              <th>Bill No.</th>
+              <th>Mode</th>
+              <th>Cheque / UTR</th>
+              <th>Gross</th>
+              <th>TDS</th>
+              <th>Net Paid</th>
+              <th>Status</th>
+              <th>Fund Impact</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
 
-        <FinanceMetricCard
-          label="Net Cash Outflow"
-          value={money(summary.net)}
-          description="Actual amount paid"
-          icon={<BadgeIndianRupee size={20} />}
-          accent="amber"
-        />
+          <tbody>
+            {rows.length ? (
+              rows.map((r) => {
+                const isPaid =
+                  String(r.status).toLowerCase() ===
+                  "paid";
 
-        <FinanceMetricCard
-          label="TDS"
-          value={money(summary.tds)}
-          description="Tax deducted at source"
-          icon={<Scale size={20} />}
-          accent="purple"
-        />
+                const isPettyCash =
+                  String(
+                    r.payment_mode
+                  ).toLowerCase() === "petty cash";
 
-        <FinanceMetricCard
-          label="Pending Expense"
-          value={money(summary.pending)}
-          description="Awaiting payment"
-          icon={<AlertTriangle size={20} />}
-          accent="blue"
-        />
-      </section>
+                return (
+                  <tr key={r.id}>
+                    <td>{r.date}</td>
 
-      <section className="finance-content-grid finance-content-grid--hero">
-        <BalanceHero
-          eyebrow="ACTUAL PAYMENT OUTFLOW"
-          title="Net Expenditure"
-          amount={money(summary.net)}
-          description="Actual financial outflow after considering TDS deductions."
-          icon={<BadgeIndianRupee size={30} />}
-          trend={{
-            label: `${summary.count} paid transactions`,
-            positive: false,
-          }}
-          variant="amber"
-        />
+                    <td>{r.requisition_no}</td>
 
-        <FinancialSummary
-          title="Expenditure Reconciliation"
-          subtitle="Gross expense to actual payment"
-          items={[
-            {
-              label: "Gross Expenditure",
-              value: money(summary.gross),
-            },
-            {
-              label: "Less: TDS",
-              value: money(summary.tds),
-              tone: "warning",
-            },
-            {
-              label: "Net Payment",
-              value: money(summary.net),
-              tone: "negative",
-            },
-            {
-              label: "Bank Expense",
-              value: money(
-                summary.bankExpense
-              ),
-            },
-            {
-              label: "Petty Cash Expense",
-              value: money(
-                summary.pettyCashExpense
-              ),
-            },
-          ]}
-        />
-      </section>
+                    <td>{r.vendor}</td>
 
-      <section className="finance-section-grid">
-        <InsightCard
-          title="TDS Monitoring"
-          description={
-            summary.tds > 0
-              ? `${money(summary.tds)} has been recorded as TDS deduction across paid expenditure.`
-              : "No TDS deduction has been recorded for paid expenses."
-          }
-          variant={
-            summary.tds > 0
-              ? "info"
-              : "success"
-          }
-        />
+                    <td>{r.bill_no || "-"}</td>
 
-        <InsightCard
-          title="Pending Payment Exposure"
-          description={
-            summary.pending > 0
-              ? `${money(summary.pending)} of expenditure is awaiting payment or clearance.`
-              : "No pending expenditure currently requires payment."
-          }
-          variant={
-            summary.pending > 0
-              ? "warning"
-              : "success"
-          }
-        />
-      </section>
+                    <td>{r.payment_mode}</td>
 
-      <ActivityTimeline
-        title="Recent Expenditure"
-        subtitle="Latest recorded expense activity"
-        items={expenses
-          .slice(0, 5)
-          .map((row) => ({
-            id: row.id,
-            title:
-              row.vendor_name ||
-              row.particulars ||
-              "Expense",
-            description:
-              row.description ||
-              row.payment_mode ||
-              "Expense transaction",
-            amount: money(
-              Number(
-                row.gross_amount || 0
-              )
-            ),
-            date:
-              row.date ||
-              row.expense_date ||
-              "-",
-            icon: (
-              <ReceiptText size={16} />
-            ),
-            status:
-              normalize(row.status) ===
-              "paid"
-                ? "completed"
-                : "pending",
-          }))}
-      />
+                    <td>
+                      {r.cheque_or_utr || "-"}
+                    </td>
 
-      <section className="finance-panel">
-        <div className="finance-panel__header">
-          <div>
-            <span className="finance-section-eyebrow">
-              EXPENDITURE REGISTER
-            </span>
+                    <td>
+                      {money(r.gross_amount)}
+                    </td>
 
-            <h3>Expense Transactions</h3>
+                    <td>
+                      {money(r.tds_amount)}
+                    </td>
 
-            <p>
-              Detailed view of expenditure,
-              payment modes and TDS.
-            </p>
+                    <td>
+                      {money(r.net_amount)}
+                    </td>
+
+                    <td>
+                      <span className="status">
+                        {r.status}
+                      </span>
+                    </td>
+
+                    <td>
+                      {!isPaid
+                        ? "No balance impact"
+                        : isPettyCash
+                        ? "Petty Cash −"
+                        : "Bank −"}
+                    </td>
+
+                    <td className="actions">
+                      <button
+                        className="btn secondary"
+                        onClick={() => edit(r)}
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        className="btn danger"
+                        onClick={() => del(r.id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td
+                  colSpan={12}
+                  className="empty"
+                >
+                  No expenditure entries yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {open && (
+        <div className="modalBg">
+          <div className="modal">
+            <div className="pageHead">
+              <h2>
+                {editing
+                  ? "Edit Expenditure"
+                  : "Add Expenditure"}
+              </h2>
+
+              <button
+                className="btn secondary"
+                onClick={() => setOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="formGrid">
+              <Field
+                label="Transaction Date"
+                type="date"
+                value={form.date}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    date: v,
+                  })
+                }
+              />
+
+              <Field
+                label="Requisition Number *"
+                value={form.requisition_no}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    requisition_no: v,
+                  })
+                }
+              />
+
+              <Field
+                label="In favour of M/S *"
+                value={form.vendor}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    vendor: v,
+                  })
+                }
+              />
+
+              <Field
+                label="Category"
+                value={form.category}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    category: v,
+                  })
+                }
+              />
+
+              <Field
+                label="Bill Number"
+                value={form.bill_no}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    bill_no: v,
+                  })
+                }
+              />
+
+              <Field
+                label="Bill Date"
+                type="date"
+                value={form.bill_date || ""}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    bill_date: v,
+                  })
+                }
+              />
+
+              <label>
+                Payment Mode
+
+                <select
+                  className="input"
+                  value={form.payment_mode}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      payment_mode: e.target.value,
+                    })
+                  }
+                >
+                  <option>Bank Transfer</option>
+                  <option>Cheque</option>
+                  <option>Petty Cash</option>
+                </select>
+              </label>
+
+              <Field
+                label="Cheque Number / UTR"
+                value={form.cheque_or_utr}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    cheque_or_utr: v,
+                  })
+                }
+              />
+
+              <Field
+                label="Cheque / Transfer Issue Date"
+                type="date"
+                value={form.payment_date || ""}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    payment_date: v,
+                  })
+                }
+              />
+
+              <Field
+                label="Gross Amount *"
+                type="number"
+                value={form.gross_amount}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    gross_amount: v,
+                  })
+                }
+              />
+
+              <Field
+                label="TDS Rate (%)"
+                type="number"
+                value={form.tds_rate}
+                set={(v) =>
+                  setForm({
+                    ...form,
+                    tds_rate: v,
+                  })
+                }
+              />
+
+              <label>
+                Status
+
+                <select
+                  className="input"
+                  value={form.status}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      status: e.target.value,
+                    })
+                  }
+                >
+                  <option>Paid</option>
+                  <option>Pending</option>
+                  <option>Cancelled</option>
+                </select>
+              </label>
+            </div>
+
+            <div
+              className="card"
+              style={{
+                marginTop: 16,
+                background: "#f7fbfa",
+              }}
+            >
+              <b>
+                Calculated TDS: {money(tdsAmount)}
+              </b>
+
+              <br />
+
+              <span className="muted">
+                Net payment: {money(netAmount)}
+              </span>
+            </div>
+
+            <label
+              style={{
+                display: "block",
+                marginTop: 14,
+              }}
+            >
+              Remarks
+
+              <textarea
+                className="input"
+                rows={3}
+                value={form.remarks}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    remarks: e.target.value,
+                  })
+                }
+              />
+            </label>
+
+            <div style={{ marginTop: 20 }}>
+              <button
+                className="btn"
+                onClick={save}
+              >
+                {editing
+                  ? "Update Expenditure"
+                  : "Save Expenditure"}
+              </button>
+            </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
 
-        <DataToolbar
-          searchValue={search}
-          onSearchChange={setSearch}
-        />
+function Field({
+  label,
+  type = "text",
+  value,
+  set,
+}: {
+  label: string;
+  type?: string;
+  value: any;
+  set: (v: string) => void;
+}) {
+  return (
+    <label>
+      {label}
 
-        <TransactionTable
-          data={filteredExpenses}
-          emptyMessage="No expense transactions found."
-          columns={[
-            {
-              key: "date",
-              label: "Date",
-              render: (row) =>
-                row.date ||
-                row.expense_date ||
-                "-",
-            },
-            {
-              key: "voucher_no",
-              label: "Voucher No.",
-              render: (row) =>
-                row.voucher_no || "-",
-            },
-            {
-              key: "vendor_name",
-              label: "Vendor",
-              render: (row) =>
-                row.vendor_name || "-",
-            },
-            {
-              key: "particulars",
-              label: "Particulars",
-              render: (row) =>
-                row.particulars ||
-                row.description ||
-                "-",
-            },
-            {
-              key: "payment_mode",
-              label: "Payment Mode",
-              render: (row) =>
-                row.payment_mode || "-",
-            },
-            {
-              key: "gross_amount",
-              label: "Gross",
-              align: "right",
-              render: (row) =>
-                money(
-                  Number(
-                    row.gross_amount || 0
-                  )
-                ),
-            },
-            {
-              key: "tds",
-              label: "TDS",
-              align: "right",
-              render: (row) =>
-                money(getTds(row)),
-            },
-            {
-              key: "net",
-              label: "Net Paid",
-              align: "right",
-              render: (row) =>
-                money(getNet(row)),
-            },
-            {
-              key: "status",
-              label: "Status",
-              render: (row) => (
-                <StatusBadge
-                  status={
-                    row.status || "Pending"
-                  }
-                  variant={
-                    normalize(row.status) ===
-                    "paid"
-                      ? "success"
-                      : "warning"
-                  }
-                />
-              ),
-            },
-          ]}
-        />
-      </section>
-    </main>
+      <input
+        className="input"
+        type={type}
+        value={value ?? ""}
+        onChange={(e) => set(e.target.value)}
+      />
+    </label>
   );
 }

@@ -1,82 +1,94 @@
-import React from "react";
+"use client";
 
-export interface FinanceMetricCardProps {
-  /** Supports both existing naming conventions */
-  label?: string;
+import { ReactNode } from "react";
+
+type MetricTone =
+  | "emerald"
+  | "blue"
+  | "purple"
+  | "amber"
+  | "rose"
+  | "slate";
+
+interface FinanceMetricCardProps {
   title?: string;
+  label?: string;
 
-  value: React.ReactNode;
+  value: string;
 
-  description?: string;
   subtitle?: string;
+  description?: string;
 
-  icon?: React.ReactNode;
+  icon?: ReactNode;
 
-  /** Supports existing pages */
   accent?: string;
-  tone?: string;
+  tone?: MetricTone;
 
-  trend?: React.ReactNode;
+  trend?: string;
 
-  trendDirection?:
-    | "up"
-    | "down"
-    | "neutral"
-    | string;
+  trendDirection?: "up" | "down" | "neutral";
 }
 
 export default function FinanceMetricCard({
-  label,
   title,
+  label,
   value,
-  description,
   subtitle,
+  description,
   icon,
   accent,
-  tone,
+  tone = "emerald",
   trend,
   trendDirection = "neutral",
 }: FinanceMetricCardProps) {
-  const heading = label || title || "";
-
-  const theme =
-    accent ||
-    tone ||
-    "primary";
+  const heading = title || label || "";
 
   return (
-    <article
-      className={`finance-metric-card finance-metric-card--${theme}`}
+    <div
+      className={`finance-metric-card tone-${tone}`}
+      style={
+        accent
+          ? {
+              ["--metric-accent" as string]: accent,
+            }
+          : undefined
+      }
     >
-      <div className="finance-metric-card__top">
-        <div className="finance-metric-card__icon">
-          {icon}
-        </div>
+      <div className="metric-card-top">
+        <div className="metric-icon">{icon}</div>
 
         {trend && (
-          <div
-            className={`finance-metric-card__trend finance-metric-card__trend--${trendDirection}`}
+          <span
+            className={`metric-trend trend-${trendDirection}`}
           >
+            {trendDirection === "up"
+              ? "↗"
+              : trendDirection === "down"
+              ? "↘"
+              : "•"}
+
             {trend}
-          </div>
+          </span>
         )}
       </div>
 
-      <div className="finance-metric-card__content">
-        <div className="finance-metric-card__label">
+      <div className="metric-card-content">
+        <span className="metric-label">
           {heading}
-        </div>
+        </span>
 
-        <div className="finance-metric-card__value">
+        <div className="metric-value">
           {value}
         </div>
 
-        {(description || subtitle) && (
-          <div className="finance-metric-card__description">
-            {description || subtitle}
-          </div>
+        {(subtitle || description) && (
+          <p className="metric-description">
+            {subtitle || description}
+          </p>
         )}
       </div>
-    </article>
+
+      <div className="metric-glow" />
+    </div>
   );
 }

@@ -1,28 +1,44 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  ArrowDownToLine,
-  ArrowRight,
-  ArrowUpFromLine,
-  Banknote,
-  RefreshCw,
-  Wallet,
-} from "lucide-react";
-
+import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-import FinancePageHeader from "../../components/finance/FinancePageHeader";
-import FinanceMetricCard from "../../components/finance/FinanceMetricCard";
-import BalanceHero from "../../components/finance/BalanceHero";
-import FinancialSummary from "../../components/finance/FinancialSummary";
-import FundMovement from "../../components/finance/FundMovement";
-import ActivityTimeline from "../../components/finance/ActivityTimeline";
-import InsightCard from "../../components/finance/InsightCard";
-import DataToolbar from "../../components/finance/DataToolbar";
-import TransactionTable from "../../components/finance/TransactionTable";
-import StatusBadge from "../../components/finance/StatusBadge";
-import EmptyState from "../../components/finance/EmptyState";
+type TransferRow = {
+  id: string;
+  date: string;
+  requisition_no: string | null;
+  type: string;
+  particulars: string;
+  amount: number;
+  reference: string | null;
+  remarks: string | null;
+  direction: "IN" | "OUT";
+};
+
+type IncomeRow = {
+  id: string;
+  date: string;
+  contributor: string;
+  flat_no: string | null;
+  amount: number;
+  mode: string;
+  reference: string | null;
+  status: string;
+};
+
+type ExpenseRow = {
+  id: string;
+  date: string;
+  requisition_no: string | null;
+  vendor: string;
+  bill_no: string | null;
+  gross_amount: number;
+  net_amount: number | null;
+  tds_amount: number | null;
+  tds_rate: number | null;
+  payment_mode: string;
+  status: string;
+};
 
 type PettyCashAccount = {
   id: string;
@@ -32,626 +48,1095 @@ type PettyCashAccount = {
   is_active: boolean;
 };
 
-type CashTransaction = {
+type LedgerRow = {
   id: string;
   date: string;
-  source: string;
-  requisition: string;
+  source: "Income" | "Expense" | "Transfer";
+  requisition_no: string | null;
   type: string;
   particulars: string;
-  reference: string;
-  cashIn: number;
-  cashOut: number;
-  status: string;
+  reference: string | null;
+  amount_in: number;
+  amount_out: number;
+  editable: boolean;
+  transferId?: string;
 };
 
-const money = (value: number) =>
+const blank = {
+  date: new Date().toISOString().slice(0, 10),
+  requisition_no: "",
+  type: "Bank Withdrawal",
+  particulars: "",
+  amount: "",
+  reference: "",
+  remarks: "",
+};
+
+const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(Number(value || 0));
-
-const normalize = (value: unknown) =>
-  String(value || "").trim().toLowerCase();
-
-const getNetPayment = (row: any) => {
-  if (
-    row.net_amount !== null &&
-    row.net_amount !== undefined
-  ) {
-    return Number(row.net_amount || 0);
-  }
-
-  const gross = Number(row.gross_amount || 0);
-
-  const tds =
-    row.tds_amount !== null &&
-    row.tds_amount !== undefined
-      ? Number(row.tds_amount || 0)
-      : gross *
-        (Number(row.tds_rate || 0) / 100);
-
-  return gross - tds;
-};
+  }).format(Number(n || 0));
 
 export default function PettyCashPage() {
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [msg, setMsg] = useState("");
+  const [transfers, setTransfers] = useState<
+    TransferRow[]
+  >([]);
 
-  const [account, setAccount] =
+  const [incomeRows, setIncomeRows] = useState<
+    IncomeRow[]
+  >([]);
+
+  const [expenseRows, setExpenseRows] = useState<
+    ExpenseRow[]
+  >([]);
+
+  const [pettyCashAccount, setPettyCashAccount] =
     useState<PettyCashAccount | null>(null);
 
-  const [cashIncome, setCashIncome] = useState<any[]>([]);
-  const [cashExpenses, setCashExpenses] = useState<any[]>([]);
-  const [transfers, setTransfers] = useState<any[]>([]);
+  const [form, setForm] = useState<any>(blank);
+  const [open, setOpen] = useState(false);
 
-  const loadData = async () => {
+  const [editing, setEditing] =
+    useState<string | null>(null);
+
+  const [msg, setMsg] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  /*
+   * ============================================
+   * LOAD ALL DATA
+   * ============================================
+   */
+
+  const load = async () => {
     setLoading(true);
     setMsg("");
 
     try {
-      const [
-        accountResponse,
-        incomeResponse,
-        expenseResponse,
-        transferResponse,
-      ] = await Promise.all([
-        supabase
-          .from("petty_cash_accounts")
-          .select("*")
-          .eq("is_active", true)
-          .maybeSingle(),
+      /*
+       * 1. LOAD PETTY CASH ACCOUNT
+       */
 
-        supabase
-          .from("income")
-          .select("*")
-          .is("deleted_at", null)
-          .eq("status", "Cleared")
-          .eq("mode", "Cash"),
+      const {
+        data: pettyCashData,
+        error: pettyCashError,
+      } = await supabase
+        .from("petty_cash_accounts")
+        .select("*")
+        .eq("is_active", true)
+        .maybeSingle();
 
-        supabase
-          .from("expenses")
-          .select("*")
-          .is("deleted_at", null)
-          .eq("status", "Paid"),
-
-        supabase
-          .from("fund_transfers")
-          .select("*")
-          .is("deleted_at", null),
-      ]);
-
-      if (accountResponse.error) {
-        throw new Error(accountResponse.error.message);
+      if (pettyCashError) {
+        throw new Error(
+          pettyCashError.message
+        );
       }
 
-      if (incomeResponse.error) {
-        throw new Error(incomeResponse.error.message);
+      setPettyCashAccount(pettyCashData);
+
+      /*
+       * 2. LOAD FUND TRANSFERS
+       */
+
+      const {
+        data: transferData,
+        error: transferError,
+      } = await supabase
+        .from("fund_transfers")
+        .select("*")
+        .is("deleted_at", null)
+        .order("date", {
+          ascending: false,
+        });
+
+      if (transferError) {
+        throw new Error(
+          transferError.message
+        );
       }
-
-      if (expenseResponse.error) {
-        throw new Error(expenseResponse.error.message);
-      }
-
-      if (transferResponse.error) {
-        throw new Error(transferResponse.error.message);
-      }
-
-      setAccount(accountResponse.data);
-
-      setCashIncome(
-        (incomeResponse.data || []).filter(
-          (row: any) =>
-            normalize(row.mode) === "cash"
-        )
-      );
-
-      setCashExpenses(
-        (expenseResponse.data || []).filter(
-          (row: any) =>
-            normalize(row.payment_mode) ===
-            "petty cash"
-        )
-      );
 
       setTransfers(
-        transferResponse.data || []
+        (transferData || []) as TransferRow[]
+      );
+
+      /*
+       * 3. LOAD CLEARED CASH INCOME
+       */
+
+      const {
+        data: incomeData,
+        error: incomeError,
+      } = await supabase
+        .from("income")
+        .select("*")
+        .is("deleted_at", null)
+        .eq("status", "Cleared")
+        .order("date", {
+          ascending: false,
+        });
+
+      if (incomeError) {
+        throw new Error(
+          incomeError.message
+        );
+      }
+
+      setIncomeRows(
+        (incomeData || []) as IncomeRow[]
+      );
+
+      /*
+       * 4. LOAD PAID EXPENSES
+       */
+
+      const {
+        data: expenseData,
+        error: expenseError,
+      } = await supabase
+        .from("expenses")
+        .select("*")
+        .is("deleted_at", null)
+        .eq("status", "Paid")
+        .order("date", {
+          ascending: false,
+        });
+
+      if (expenseError) {
+        throw new Error(
+          expenseError.message
+        );
+      }
+
+      setExpenseRows(
+        (expenseData || []) as ExpenseRow[]
       );
     } catch (error: any) {
       setMsg(
         error?.message ||
           "Unable to load petty cash data."
       );
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   };
 
   useEffect(() => {
-    loadData();
+    load();
   }, []);
 
-  const summary = useMemo(() => {
-    const openingBalance = Number(
-      account?.opening_balance || 0
+  /*
+   * ============================================
+   * CASH INCOME
+   *
+   * Only Cleared + Cash income
+   * increases Petty Cash.
+   * ============================================
+   */
+
+  const cashIncome = incomeRows.filter(
+    (row) =>
+      String(row.mode || "")
+        .toLowerCase()
+        .trim() === "cash"
+  );
+
+  /*
+   * ============================================
+   * PETTY CASH EXPENSES
+   *
+   * Only Paid + Petty Cash expenses
+   * reduce Petty Cash.
+   * ============================================
+   */
+
+  const pettyCashExpenses =
+    expenseRows.filter(
+      (row) =>
+        String(row.payment_mode || "")
+          .toLowerCase()
+          .trim() === "petty cash"
     );
 
-    const totalCashIncome =
-      cashIncome.reduce(
-        (sum, row) =>
-          sum + Number(row.amount || 0),
-        0
-      );
+  /*
+   * ============================================
+   * BANK → PETTY CASH
+   *
+   * Cash increases.
+   * ============================================
+   */
 
-    const totalExpense =
-      cashExpenses.reduce(
-        (sum, row) =>
-          sum + getNetPayment(row),
-        0
-      );
+  const bankToPettyCash =
+    transfers.filter(
+      (row) =>
+        row.type ===
+          "Bank Withdrawal" ||
+        row.type === "Withdrawal"
+    );
 
-    const bankToCash = transfers
-      .filter((row) =>
-        [
-          "bank withdrawal",
-          "withdrawal",
-        ].includes(normalize(row.type))
-      )
-      .reduce(
-        (sum, row) =>
-          sum + Number(row.amount || 0),
-        0
-      );
+  /*
+   * ============================================
+   * PETTY CASH → BANK
+   *
+   * Cash decreases.
+   * ============================================
+   */
 
-    const cashToBank = transfers
-      .filter((row) =>
-        [
-          "petty cash to bank",
-          "cash deposit",
-          "deposit",
-          "petty cash deposit",
-          "return to bank",
-        ].includes(normalize(row.type))
-      )
-      .reduce(
-        (sum, row) =>
-          sum + Number(row.amount || 0),
-        0
-      );
+  const pettyCashToBank =
+    transfers.filter(
+      (row) =>
+        row.type ===
+          "Petty Cash to Bank" ||
+        row.type === "Cash Deposit" ||
+        row.type ===
+          "Petty Cash Deposit" ||
+        row.type ===
+          "Return to Bank"
+    );
 
-    const adjustmentCredit = transfers
-      .filter(
-        (row) =>
-          [
-            "cash adjustment",
-            "cash adjustment +",
-          ].includes(normalize(row.type)) &&
-          normalize(row.direction) === "in"
-      )
-      .reduce(
-        (sum, row) =>
-          sum + Number(row.amount || 0),
-        0
-      );
+  /*
+   * ============================================
+   * CASH ADJUSTMENTS
+   *
+   * Only Cash Adjustment records
+   * affect Petty Cash.
+   *
+   * Bank Adjustment records must NOT
+   * affect this balance.
+   * ============================================
+   */
 
-    const adjustmentDebit = transfers
-      .filter(
-        (row) =>
-          [
-            "cash adjustment",
-            "cash adjustment -",
-          ].includes(normalize(row.type)) &&
-          normalize(row.direction) === "out"
-      )
-      .reduce(
-        (sum, row) =>
-          sum + Number(row.amount || 0),
-        0
-      );
+  const cashAdjustmentIn =
+    transfers.filter(
+      (row) =>
+        row.type ===
+          "Cash Adjustment" &&
+        row.direction === "IN"
+    );
 
-    const balance =
-      openingBalance +
-      totalCashIncome +
-      bankToCash -
-      totalExpense -
-      cashToBank +
-      adjustmentCredit -
-      adjustmentDebit;
+  const cashAdjustmentOut =
+    transfers.filter(
+      (row) =>
+        row.type ===
+          "Cash Adjustment" &&
+        row.direction === "OUT"
+    );
 
-    return {
-      openingBalance,
-      totalCashIncome,
-      totalExpense,
-      bankToCash,
-      cashToBank,
-      adjustmentCredit,
-      adjustmentDebit,
-      balance,
-    };
-  }, [
-    account,
-    cashIncome,
-    cashExpenses,
-    transfers,
-  ]);
+  /*
+   * ============================================
+   * TOTALS
+   * ============================================
+   */
 
-  const transactions = useMemo(() => {
-    const incomeRows: CashTransaction[] =
-      cashIncome.map((row: any) => ({
-        id: `income-${row.id}`,
-        date:
-          row.date ||
-          row.income_date ||
-          "",
-        source: "Cash Income",
-        requisition:
-          row.voucher_no ||
-          "-",
-        type: "Cash In",
-        particulars:
-          row.particulars ||
-          row.description ||
-          row.source ||
-          "-",
-        reference:
-          row.reference_no ||
-          "-",
-        cashIn: Number(row.amount || 0),
-        cashOut: 0,
-        status: row.status || "Cleared",
-      }));
+  const totalCashIncome =
+    cashIncome.reduce(
+      (sum, row) =>
+        sum +
+        Number(row.amount || 0),
+      0
+    );
 
-    const expenseRows: CashTransaction[] =
-      cashExpenses.map((row: any) => ({
-        id: `expense-${row.id}`,
-        date:
-          row.date ||
-          row.expense_date ||
-          "",
-        source: "Petty Cash Expense",
-        requisition:
-          row.voucher_no ||
-          "-",
-        type: "Cash Out",
-        particulars:
-          row.particulars ||
-          row.description ||
-          row.vendor_name ||
-          "-",
-        reference:
-          row.reference_no ||
-          "-",
-        cashIn: 0,
-        cashOut: getNetPayment(row),
-        status: row.status || "Paid",
-      }));
+  const totalPettyCashExpense =
+    pettyCashExpenses.reduce(
+      (sum, row) => {
+        const netAmount =
+          row.net_amount !== null &&
+          row.net_amount !== undefined
+            ? Number(row.net_amount)
+            : Number(
+                row.gross_amount || 0
+              ) -
+              Number(
+                row.tds_amount || 0
+              );
 
-    const transferRows: CashTransaction[] =
-      transfers.map((row: any) => {
-        const type = normalize(row.type);
+        return sum + netAmount;
+      },
+      0
+    );
 
-        const isIn =
-          [
-            "bank withdrawal",
-            "withdrawal",
-          ].includes(type) ||
-          normalize(row.direction) === "in";
+  const totalBankToPettyCash =
+    bankToPettyCash.reduce(
+      (sum, row) =>
+        sum +
+        Number(row.amount || 0),
+      0
+    );
+
+  const totalPettyCashToBank =
+    pettyCashToBank.reduce(
+      (sum, row) =>
+        sum +
+        Number(row.amount || 0),
+      0
+    );
+
+  const totalCashAdjustmentIn =
+    cashAdjustmentIn.reduce(
+      (sum, row) =>
+        sum +
+        Number(row.amount || 0),
+      0
+    );
+
+  const totalCashAdjustmentOut =
+    cashAdjustmentOut.reduce(
+      (sum, row) =>
+        sum +
+        Number(row.amount || 0),
+      0
+    );
+
+  /*
+   * ============================================
+   * FINAL PETTY CASH BALANCE
+   * ============================================
+   */
+
+  const openingBalance =
+    Number(
+      pettyCashAccount?.opening_balance || 0
+    );
+
+  const balance =
+    openingBalance +
+    totalCashIncome +
+    totalBankToPettyCash -
+    totalPettyCashExpense -
+    totalPettyCashToBank +
+    totalCashAdjustmentIn -
+    totalCashAdjustmentOut;
+
+  /*
+   * ============================================
+   * CONSOLIDATED PETTY CASH LEDGER
+   * ============================================
+   */
+
+  const ledger: LedgerRow[] = [
+    /*
+     * CASH INCOME
+     */
+
+    ...cashIncome.map((row) => ({
+      id: `income-${row.id}`,
+      date: row.date,
+      source: "Income" as const,
+      requisition_no: null,
+      type: "Cash Income",
+      particulars: row.contributor,
+      reference: row.reference,
+      amount_in: Number(row.amount || 0),
+      amount_out: 0,
+      editable: false,
+    })),
+
+    /*
+     * PETTY CASH EXPENSE
+     */
+
+    ...pettyCashExpenses.map(
+      (row) => {
+        const netAmount =
+          row.net_amount !== null &&
+          row.net_amount !== undefined
+            ? Number(row.net_amount)
+            : Number(
+                row.gross_amount || 0
+              ) -
+              Number(
+                row.tds_amount || 0
+              );
 
         return {
-          id: `transfer-${row.id}`,
-          date:
-            row.date ||
-            row.transfer_date ||
-            "",
-          source: "Fund Transfer",
-          requisition:
-            row.voucher_no ||
-            "-",
-          type: row.type || "Transfer",
-          particulars:
-            row.particulars ||
-            row.description ||
-            "-",
-          reference:
-            row.reference_no ||
-            "-",
-          cashIn: isIn
+          id: `expense-${row.id}`,
+          date: row.date,
+          source: "Expense" as const,
+          requisition_no:
+            row.requisition_no,
+          type: "Petty Cash Expense",
+          particulars: row.vendor,
+          reference: row.bill_no,
+          amount_in: 0,
+          amount_out: netAmount,
+          editable: false,
+        };
+      }
+    ),
+
+    /*
+     * RELEVANT TRANSFERS ONLY
+     *
+     * Do not show Bank Adjustment
+     * transactions in the Petty Cash
+     * ledger.
+     */
+
+    ...transfers
+      .filter(
+        (row) =>
+          row.type ===
+            "Bank Withdrawal" ||
+          row.type === "Withdrawal" ||
+          row.type ===
+            "Petty Cash to Bank" ||
+          row.type ===
+            "Cash Deposit" ||
+          row.type ===
+            "Petty Cash Deposit" ||
+          row.type ===
+            "Return to Bank" ||
+          row.type ===
+            "Cash Adjustment"
+      )
+      .map((row) => ({
+        id: `transfer-${row.id}`,
+        date: row.date,
+        source: "Transfer" as const,
+        requisition_no:
+          row.requisition_no,
+        type: row.type,
+        particulars: row.particulars,
+        reference: row.reference,
+
+        amount_in:
+          row.type ===
+            "Bank Withdrawal" ||
+          row.type === "Withdrawal" ||
+          (
+            row.type ===
+              "Cash Adjustment" &&
+            row.direction === "IN"
+          )
             ? Number(row.amount || 0)
             : 0,
-          cashOut: isIn
-            ? 0
-            : Number(row.amount || 0),
-          status: row.status || "Completed",
-        };
-      });
 
-    return [
-      ...incomeRows,
-      ...expenseRows,
-      ...transferRows,
-    ].sort(
-      (a, b) =>
-        new Date(b.date).getTime() -
-        new Date(a.date).getTime()
-    );
-  }, [
-    cashIncome,
-    cashExpenses,
-    transfers,
-  ]);
+        amount_out:
+          row.type ===
+            "Petty Cash to Bank" ||
+          row.type ===
+            "Cash Deposit" ||
+          row.type ===
+            "Petty Cash Deposit" ||
+          row.type ===
+            "Return to Bank" ||
+          (
+            row.type ===
+              "Cash Adjustment" &&
+            row.direction === "OUT"
+          )
+            ? Number(row.amount || 0)
+            : 0,
 
-  const filteredTransactions =
-    transactions.filter((row) =>
-      [
-        row.date,
-        row.source,
-        row.requisition,
-        row.type,
-        row.particulars,
-        row.reference,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(search.toLowerCase())
-    );
+        editable: true,
+        transferId: row.id,
+      })),
+  ].sort(
+    (a, b) =>
+      new Date(b.date).getTime() -
+      new Date(a.date).getTime()
+  );
+
+  /*
+   * ============================================
+   * SAVE CASH MOVEMENT
+   * ============================================
+   */
+
+  const save = async () => {
+    if (
+      !form.particulars.trim() ||
+      !form.amount
+    ) {
+      setMsg(
+        "Particulars and amount are required."
+      );
+      return;
+    }
+
+    if (Number(form.amount) <= 0) {
+      setMsg(
+        "Amount must be greater than zero."
+      );
+      return;
+    }
+
+    /*
+     * Normalize UI type to database type.
+     */
+
+    const normalizedType =
+      form.type === "Cash Adjustment +" ||
+      form.type === "Cash Adjustment -"
+        ? "Cash Adjustment"
+        : form.type;
+
+    /*
+     * Determine direction.
+     */
+
+    let direction: "IN" | "OUT" = "OUT";
+
+    if (
+      form.type ===
+        "Bank Withdrawal" ||
+      form.type === "Withdrawal" ||
+      form.type ===
+        "Cash Adjustment +"
+    ) {
+      direction = "IN";
+    }
+
+    const payload = {
+      date: form.date,
+
+      requisition_no:
+        form.requisition_no.trim() ||
+        null,
+
+      type: normalizedType,
+
+      particulars:
+        form.particulars.trim(),
+
+      reference:
+        form.reference.trim() ||
+        null,
+
+      amount: Number(form.amount),
+
+      remarks:
+        form.remarks.trim() ||
+        null,
+
+      direction,
+    };
+
+    let error: any;
+
+    if (editing) {
+      ({ error } = await supabase
+        .from("fund_transfers")
+        .update(payload)
+        .eq("id", editing));
+    } else {
+      ({ error } = await supabase
+        .from("fund_transfers")
+        .insert(payload));
+    }
+
+    if (error) {
+      setMsg(error.message);
+      return;
+    }
+
+    setOpen(false);
+    setEditing(null);
+    setForm(blank);
+    setMsg("");
+
+    await load();
+  };
+
+  /*
+   * ============================================
+   * EDIT CASH MOVEMENT
+   * ============================================
+   */
+
+  const edit = (
+    row: TransferRow
+  ) => {
+    setEditing(row.id);
+
+    let displayType = row.type;
+
+    if (
+      row.type ===
+      "Cash Adjustment"
+    ) {
+      displayType =
+        row.direction === "IN"
+          ? "Cash Adjustment +"
+          : "Cash Adjustment -";
+    }
+
+    setForm({
+      ...row,
+
+      type: displayType,
+
+      amount: String(row.amount),
+
+      requisition_no:
+        row.requisition_no || "",
+
+      reference:
+        row.reference || "",
+
+      remarks:
+        row.remarks || "",
+    });
+
+    setOpen(true);
+  };
+
+  /*
+   * ============================================
+   * DELETE CASH MOVEMENT
+   * ============================================
+   */
+
+  const del = async (
+    id: string
+  ) => {
+    if (
+      !confirm(
+        "Delete this petty cash movement?"
+      )
+    ) {
+      return;
+    }
+
+    const { error } = await supabase
+      .from("fund_transfers")
+      .update({
+        deleted_at:
+          new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (error) {
+      setMsg(error.message);
+      return;
+    }
+
+    await load();
+  };
+
+  const openNewEntry = () => {
+    setEditing(null);
+    setForm(blank);
+    setMsg("");
+    setOpen(true);
+  };
+
+  /*
+   * ============================================
+   * LOADING
+   * ============================================
+   */
 
   if (loading) {
     return (
-      <div className="finance-loading">
-        Loading petty cash...
+      <div className="card">
+        <h2>
+          Loading Petty Cash...
+        </h2>
       </div>
     );
   }
 
-  if (!account) {
-    return (
-      <EmptyState
-        title="Petty Cash Account Not Configured"
-        description="Configure an active petty cash account before recording transactions."
-        icon={<Wallet size={30} />}
-      />
-    );
-  }
+  /*
+   * ============================================
+   * PAGE
+   * ============================================
+   */
 
   return (
-    <main className="finance-page">
-      <FinancePageHeader
-        eyebrow="GPCC FINANCIAL OPERATIONS"
-        title="Petty Cash"
-        description="Monitor available cash, operational expenditure and fund movement in one place."
-        badge={
-          <StatusBadge
-            status="Live Position"
-            variant="success"
-          />
-        }
-        action={
-          <button
-            className="finance-button finance-button--secondary"
-            onClick={loadData}
-          >
-            <RefreshCw size={17} />
-            Refresh
-          </button>
-        }
-      />
+    <div>
+      <div className="pageHead">
+        <div>
+          <h1>Petty Cash</h1>
+
+          <p className="muted">
+            {pettyCashAccount
+              ? `${pettyCashAccount.account_name} · Opening balance as on ${pettyCashAccount.opening_balance_date}`
+              : "Consolidated petty cash ledger"}
+          </p>
+        </div>
+
+        <button
+          className="btn"
+          onClick={openNewEntry}
+        >
+          + Add Cash Movement
+        </button>
+      </div>
 
       {msg && (
-        <div className="finance-alert finance-alert--danger">
+        <div
+          className="card"
+          style={{
+            marginBottom: 14,
+            color: "#b42318",
+          }}
+        >
           {msg}
         </div>
       )}
 
-      <section className="finance-metrics-grid">
-        <FinanceMetricCard
-          label="Opening Balance"
-          value={money(summary.openingBalance)}
-          description="Opening petty cash position"
-          icon={<Wallet size={20} />}
-          accent="blue"
-        />
+      <div
+        className="grid"
+        style={{
+          marginBottom: 20,
+        }}
+      >
+        <div className="card">
+          <div className="muted">
+            Opening Petty Cash
+          </div>
 
-        <FinanceMetricCard
-          label="Cash Received"
-          value={money(
-            summary.totalCashIncome +
-              summary.bankToCash
-          )}
-          description="Cash income and bank withdrawals"
-          icon={<ArrowDownToLine size={20} />}
-          accent="green"
-        />
-
-        <FinanceMetricCard
-          label="Cash Spent"
-          value={money(summary.totalExpense)}
-          description="Paid petty cash expenses"
-          icon={<ArrowUpFromLine size={20} />}
-          accent="amber"
-        />
-
-        <FinanceMetricCard
-          label="Available Cash"
-          value={money(summary.balance)}
-          description="Current petty cash position"
-          icon={<Banknote size={20} />}
-          accent="purple"
-        />
-      </section>
-
-      <section className="finance-content-grid finance-content-grid--hero">
-        <BalanceHero
-          eyebrow="CURRENT CASH POSITION"
-          title={account.account_name}
-          amount={money(summary.balance)}
-          description="Current available petty cash after income, expenses, transfers and adjustments."
-          icon={<Banknote size={30} />}
-          trend={{
-            label:
-              summary.balance >= 0
-                ? "Cash position is positive"
-                : "Cash position requires review",
-            positive:
-              summary.balance >= 0,
-          }}
-          variant="green"
-        />
-
-        <FinancialSummary
-          title="Cash Reconciliation"
-          subtitle="Complete movement of available petty cash"
-          items={[
-            {
-              label: "Opening Balance",
-              value: money(
-                summary.openingBalance
-              ),
-            },
-            {
-              label: "Cash Income",
-              value: money(
-                summary.totalCashIncome
-              ),
-              tone: "positive",
-            },
-            {
-              label: "Bank → Petty Cash",
-              value: money(
-                summary.bankToCash
-              ),
-              tone: "positive",
-            },
-            {
-              label: "Cash Expenses",
-              value: money(
-                summary.totalExpense
-              ),
-              tone: "negative",
-            },
-            {
-              label: "Cash → Bank",
-              value: money(
-                summary.cashToBank
-              ),
-              tone: "negative",
-            },
-            {
-              label: "Current Cash",
-              value: money(
-                summary.balance
-              ),
-              tone: "positive",
-            },
-          ]}
-        />
-      </section>
-
-      <section className="finance-section-grid">
-        <FundMovement
-          from="Bank Account"
-          to="Petty Cash"
-          amount={money(summary.bankToCash)}
-          description="Total funds transferred into petty cash."
-          status="completed"
-        />
-
-        <InsightCard
-          title={
-            summary.balance > 0
-              ? "Healthy Cash Position"
-              : "Cash Position Requires Attention"
-          }
-          description={
-            summary.balance > 0
-              ? "Petty cash currently has a positive available balance."
-              : "Review recent expenses and transfers."
-          }
-          variant={
-            summary.balance > 0
-              ? "success"
-              : "warning"
-          }
-        />
-      </section>
-
-      <section className="finance-panel">
-        <div className="finance-panel__header">
-          <div>
-            <span className="finance-section-eyebrow">
-              CASH REGISTER
-            </span>
-
-            <h3>Petty Cash Activity</h3>
-
-            <p>
-              Complete history of cash receipts,
-              expenditure and transfers.
-            </p>
+          <div className="metric">
+            {money(openingBalance)}
           </div>
         </div>
 
-        <DataToolbar
-          searchValue={search}
-          onSearchChange={setSearch}
-        />
+        <div className="card">
+          <div className="muted">
+            Cleared Cash Income
+          </div>
 
-        <TransactionTable
-          data={filteredTransactions}
-          emptyMessage="No petty cash transactions found."
-          columns={[
-            {
-              key: "date",
-              label: "Date",
-            },
-            {
-              key: "source",
-              label: "Source",
-            },
-            {
-              key: "requisition",
-              label: "Voucher / Req.",
-            },
-            {
-              key: "type",
-              label: "Type",
-            },
-            {
-              key: "particulars",
-              label: "Particulars",
-            },
-            {
-              key: "cashIn",
-              label: "Cash In",
-              align: "right",
-              render: (row) =>
-                row.cashIn
-                  ? money(row.cashIn)
-                  : "-",
-            },
-            {
-              key: "cashOut",
-              label: "Cash Out",
-              align: "right",
-              render: (row) =>
-                row.cashOut
-                  ? money(row.cashOut)
-                  : "-",
-            },
-            {
-              key: "status",
-              label: "Status",
-              render: (row) => (
-                <StatusBadge
-                  status={row.status}
-                  variant="success"
-                />
-              ),
-            },
-          ]}
-        />
-      </section>
-    </main>
+          <div className="metric">
+            {money(totalCashIncome)}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Bank → Petty Cash
+          </div>
+
+          <div className="metric">
+            {money(
+              totalBankToPettyCash
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Petty Cash Expenses
+          </div>
+
+          <div className="metric">
+            {money(
+              totalPettyCashExpense
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Petty Cash → Bank
+          </div>
+
+          <div className="metric">
+            {money(
+              totalPettyCashToBank
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Current Petty Cash
+          </div>
+
+          <div className="metric">
+            {money(balance)}
+          </div>
+        </div>
+      </div>
+
+      <div className="card tableWrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Source</th>
+              <th>Requisition No.</th>
+              <th>Type</th>
+              <th>Particulars</th>
+              <th>Reference</th>
+              <th>Cash In</th>
+              <th>Cash Out</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {ledger.length ? (
+              ledger.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.date}</td>
+
+                  <td>{row.source}</td>
+
+                  <td>
+                    {row.requisition_no ||
+                      "-"}
+                  </td>
+
+                  <td>{row.type}</td>
+
+                  <td>
+                    {row.particulars}
+                  </td>
+
+                  <td>
+                    {row.reference || "-"}
+                  </td>
+
+                  <td>
+                    {row.amount_in
+                      ? money(row.amount_in)
+                      : "-"}
+                  </td>
+
+                  <td>
+                    {row.amount_out
+                      ? money(row.amount_out)
+                      : "-"}
+                  </td>
+
+                  <td className="actions">
+                    {row.editable &&
+                    row.transferId ? (
+                      <>
+                        <button
+                          className="btn secondary"
+                          onClick={() => {
+                            const transfer =
+                              transfers.find(
+                                (x) =>
+                                  x.id ===
+                                  row.transferId
+                              );
+
+                            if (transfer) {
+                              edit(transfer);
+                            }
+                          }}
+                        >
+                          Edit
+                        </button>
+
+                        <button
+                          className="btn danger"
+                          onClick={() =>
+                            del(
+                              row.transferId!
+                            )
+                          }
+                        >
+                          Delete
+                        </button>
+                      </>
+                    ) : (
+                      <span className="muted">
+                        Edit from{" "}
+                        {row.source} module
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td
+                  colSpan={9}
+                  className="empty"
+                >
+                  No petty cash movements yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {open && (
+        <div className="modalBg">
+          <div className="modal">
+            <div className="pageHead">
+              <h2>
+                {editing
+                  ? "Edit Cash Movement"
+                  : "Add Cash Movement"}
+              </h2>
+
+              <button
+                className="btn secondary"
+                onClick={() =>
+                  setOpen(false)
+                }
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="formGrid">
+              <Field
+                label="Date"
+                type="date"
+                value={form.date}
+                set={(value) =>
+                  setForm({
+                    ...form,
+                    date: value,
+                  })
+                }
+              />
+
+              <Field
+                label="Requisition Number"
+                value={
+                  form.requisition_no
+                }
+                set={(value) =>
+                  setForm({
+                    ...form,
+                    requisition_no:
+                      value,
+                  })
+                }
+              />
+
+              <label>
+                Cash Movement Type
+
+                <select
+                  className="input"
+                  value={form.type}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      type:
+                        e.target.value,
+                    })
+                  }
+                >
+                  <option value="Bank Withdrawal">
+                    Bank → Petty Cash
+                  </option>
+
+                  <option value="Petty Cash to Bank">
+                    Petty Cash → Bank
+                  </option>
+
+                  <option value="Cash Adjustment +">
+                    Cash Adjustment (+)
+                  </option>
+
+                  <option value="Cash Adjustment -">
+                    Cash Adjustment (-)
+                  </option>
+                </select>
+              </label>
+
+              <Field
+                label="Amount"
+                type="number"
+                value={form.amount}
+                set={(value) =>
+                  setForm({
+                    ...form,
+                    amount: value,
+                  })
+                }
+              />
+
+              <Field
+                label="Particulars"
+                value={form.particulars}
+                set={(value) =>
+                  setForm({
+                    ...form,
+                    particulars: value,
+                  })
+                }
+              />
+
+              <Field
+                label="Reference / Voucher / Bank Reference"
+                value={form.reference}
+                set={(value) =>
+                  setForm({
+                    ...form,
+                    reference: value,
+                  })
+                }
+              />
+            </div>
+
+            <label
+              style={{
+                display: "block",
+                marginTop: 14,
+              }}
+            >
+              Remarks
+
+              <textarea
+                className="input"
+                rows={3}
+                value={form.remarks}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    remarks:
+                      e.target.value,
+                  })
+                }
+              />
+            </label>
+
+            <div
+              style={{
+                marginTop: 20,
+              }}
+            >
+              <button
+                className="btn"
+                onClick={save}
+              >
+                {editing
+                  ? "Update Entry"
+                  : "Save Entry"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  type = "text",
+  value,
+  set,
+}: {
+  label: string;
+  type?: string;
+  value: any;
+  set: (value: string) => void;
+}) {
+  return (
+    <label>
+      {label}
+
+      <input
+        className="input"
+        type={type}
+        value={value ?? ""}
+        onChange={(e) =>
+          set(e.target.value)
+        }
+      />
+    </label>
   );
 }

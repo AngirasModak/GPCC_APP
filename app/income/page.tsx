@@ -1,414 +1,504 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  BanknoteArrowDown,
-  CircleDollarSign,
-  Landmark,
-  RefreshCw,
-  TrendingUp,
-} from "lucide-react";
-
+import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-import FinancePageHeader from "../../components/finance/FinancePageHeader";
-import FinanceMetricCard from "../../components/finance/FinanceMetricCard";
-import BalanceHero from "../../components/finance/BalanceHero";
-import FinancialSummary from "../../components/finance/FinancialSummary";
-import ActivityTimeline from "../../components/finance/ActivityTimeline";
-import InsightCard from "../../components/finance/InsightCard";
-import DataToolbar from "../../components/finance/DataToolbar";
-import TransactionTable from "../../components/finance/TransactionTable";
-import StatusBadge from "../../components/finance/StatusBadge";
-import EmptyState from "../../components/finance/EmptyState";
+type Row = {
+  id: string;
+  date: string;
+  contributor: string;
+  flat_no: string;
+  amount: number;
+  mode: string;
+  reference: string;
+  status: string;
+};
 
-const money = (value: number) =>
+const initial = {
+  date: new Date().toISOString().slice(0, 10),
+  contributor: "",
+  flat_no: "",
+  amount: "",
+  mode: "Cash",
+  reference: "",
+  status: "Cleared",
+};
+
+const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(Number(value || 0));
+  }).format(Number(n || 0));
 
-const normalize = (value: unknown) =>
-  String(value || "").trim().toLowerCase();
-
-export default function IncomePage() {
-  const [loading, setLoading] = useState(true);
-  const [income, setIncome] = useState<any[]>([]);
-  const [search, setSearch] = useState("");
+export default function Income() {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [form, setForm] = useState<any>(initial);
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
 
-  const loadData = async () => {
-    setLoading(true);
+  const load = async () => {
     setMsg("");
 
-    try {
-      const { data, error } =
-        await supabase
-          .from("income")
-          .select("*")
-          .is("deleted_at", null)
-          .order("created_at", {
-            ascending: false,
-          });
+    const { data, error } = await supabase
+      .from("income")
+      .select("*")
+      .is("deleted_at", null)
+      .order("date", { ascending: false });
 
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      setIncome(data || []);
-    } catch (error: any) {
-      setMsg(
-        error?.message ||
-          "Unable to load income data."
-      );
-    } finally {
-      setLoading(false);
+    if (error) {
+      setMsg(error.message);
+    } else {
+      setRows((data || []) as Row[]);
     }
   };
 
   useEffect(() => {
-    loadData();
+    load();
   }, []);
 
-  const summary = useMemo(() => {
-    const cleared = income.filter(
-      (row) =>
-        normalize(row.status) === "cleared"
-    );
+  const save = async () => {
+    if (!form.contributor || !form.amount) {
+      setMsg("Contributor and amount are required.");
+      return;
+    }
 
-    const totalIncome = cleared.reduce(
-      (sum, row) =>
-        sum + Number(row.amount || 0),
+    if (Number(form.amount) <= 0) {
+      setMsg("Amount must be greater than zero.");
+      return;
+    }
+
+    const payload = {
+      date: form.date,
+      contributor: form.contributor.trim(),
+      flat_no: form.flat_no.trim() || null,
+      amount: Number(form.amount),
+      mode: form.mode,
+      reference: form.reference.trim() || null,
+      status: form.status,
+    };
+
+    let error: any;
+
+    if (editing) {
+      ({ error } = await supabase
+        .from("income")
+        .update(payload)
+        .eq("id", editing));
+    } else {
+      ({ error } = await supabase
+        .from("income")
+        .insert(payload));
+    }
+
+    if (error) {
+      setMsg(error.message);
+      return;
+    }
+
+    setOpen(false);
+    setEditing(null);
+    setForm(initial);
+    setMsg("");
+
+    load();
+  };
+
+  const edit = (r: Row) => {
+    setEditing(r.id);
+
+    setForm({
+      ...r,
+      amount: String(r.amount),
+    });
+
+    setOpen(true);
+  };
+
+  const del = async (id: string) => {
+    if (!confirm("Delete this income entry?")) return;
+
+    const { error } = await supabase
+      .from("income")
+      .update({
+        deleted_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (error) {
+      setMsg(error.message);
+    } else {
+      load();
+    }
+  };
+
+    /*
+   * ============================================
+   * FINANCIAL IMPACT CALCULATIONS
+   *
+   * Only CLEARED income affects GPCC balances.
+   *
+   * Cash      → Petty Cash
+   * Non-Cash  → Bank
+   * ============================================
+   */
+
+  const clearedRows = rows.filter(
+    (r) =>
+      String(r.status || "")
+        .trim()
+        .toLowerCase() === "cleared"
+  );
+
+  const totalIncome = clearedRows.reduce(
+    (sum, r) => sum + Number(r.amount || 0),
+    0
+  );
+
+  const cashIncome = clearedRows
+    .filter(
+      (r) =>
+        String(r.mode || "")
+          .trim()
+          .toLowerCase() === "cash"
+    )
+    .reduce(
+      (sum, r) => sum + Number(r.amount || 0),
       0
     );
 
-    const cashIncome = cleared
-      .filter(
-        (row) =>
-          normalize(row.mode) === "cash"
-      )
-      .reduce(
-        (sum, row) =>
-          sum + Number(row.amount || 0),
-        0
-      );
 
-    const bankIncome = cleared
-      .filter(
-        (row) =>
-          normalize(row.mode) !== "cash"
-      )
-      .reduce(
-        (sum, row) =>
-          sum + Number(row.amount || 0),
-        0
-      );
-
-    const pendingIncome = income
-      .filter(
-        (row) =>
-          normalize(row.status) !== "cleared"
-      )
-      .reduce(
-        (sum, row) =>
-          sum + Number(row.amount || 0),
-        0
-      );
-
-    return {
-      totalIncome,
-      cashIncome,
-      bankIncome,
-      pendingIncome,
-      transactionCount: cleared.length,
-    };
-  }, [income]);
-
-  const filteredIncome =
-    income.filter((row) =>
-      [
-        row.voucher_no,
-        row.source,
-        row.particulars,
-        row.description,
-        row.mode,
-        row.status,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(search.toLowerCase())
+   const bankIncome = clearedRows
+    .filter(
+      (r) =>
+        String(r.mode || "")
+          .trim()
+          .toLowerCase() !== "cash"
+    )
+    .reduce(
+      (sum, r) => sum + Number(r.amount || 0),
+      0
     );
-
-  if (loading) {
-    return (
-      <div className="finance-loading">
-        Loading income...
-      </div>
-    );
-  }
 
   return (
-    <main className="finance-page">
-      <FinancePageHeader
-        eyebrow="GPCC FINANCIAL OPERATIONS"
-        title="Income & Subscription"
-        description="Track subscriptions, donations, contributions and other financial inflows."
-        badge={
-          <StatusBadge
-            status={`${summary.transactionCount} Cleared`}
-            variant="success"
-          />
-        }
-        action={
-          <button
-            className="finance-button finance-button--secondary"
-            onClick={loadData}
-          >
-            <RefreshCw size={17} />
-            Refresh
-          </button>
-        }
-      />
+    <>
+      <div className="pageHead">
+        <div>
+          <h1>Income & Puja Subscription</h1>
+
+          <p className="muted">
+            Cash receipts automatically contribute to
+            Petty Cash. Non-cash receipts contribute
+            to the Bank position.
+          </p>
+        </div>
+
+        <button
+          className="btn"
+          onClick={() => {
+            setEditing(null);
+            setForm(initial);
+            setOpen(true);
+          }}
+        >
+          + Add Income
+        </button>
+      </div>
+
+      <div
+        className="grid"
+        style={{ marginBottom: 20 }}
+      >
+        <div className="card">
+          <div className="muted">
+            Cleared Income
+          </div>
+
+          <div className="metric">
+            {money(totalIncome)}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Cash → Petty Cash
+          </div>
+
+          <div className="metric">
+            {money(cashIncome)}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="muted">
+            Non-Cash → Bank
+          </div>
+
+          <div className="metric">
+            {money(bankIncome)}
+          </div>
+        </div>
+      </div>
 
       {msg && (
-        <div className="finance-alert finance-alert--danger">
+        <div
+          className="card"
+          style={{
+            marginBottom: 14,
+            color: "#b42318",
+          }}
+        >
           {msg}
         </div>
       )}
 
-      <section className="finance-metrics-grid">
-        <FinanceMetricCard
-          label="Cleared Income"
-          value={money(summary.totalIncome)}
-          description="Total realised income"
-          icon={<TrendingUp size={20} />}
-          accent="green"
-        />
+      <div className="card tableWrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Contributor</th>
+              <th>Flat</th>
+              <th>Receipt Mode</th>
+              <th>Reference</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th>Fund Impact</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
 
-        <FinanceMetricCard
-          label="Bank Collection"
-          value={money(summary.bankIncome)}
-          description="Non-cash income"
-          icon={<Landmark size={20} />}
-          accent="blue"
-        />
+          <tbody>
+            {rows.length ? (
+              rows.map((r) => {
+                const isCash =
+                    String(r.mode || "")
+                        .trim()
+                        .toLowerCase() === "cash";
 
-        <FinanceMetricCard
-          label="Cash Collection"
-          value={money(summary.cashIncome)}
-          description="Cash received"
-          icon={<BanknoteArrowDown size={20} />}
-          accent="amber"
-        />
+                const isCleared =
+                    String(r.status || "")
+                        .trim()
+                        .toLowerCase() === "cleared";
 
-        <FinanceMetricCard
-          label="Pending Income"
-          value={money(summary.pendingIncome)}
-          description="Awaiting clearance"
-          icon={<CircleDollarSign size={20} />}
-          accent="purple"
-        />
-      </section>
+                return (
+                  <tr key={r.id}>
+                    <td>{r.date}</td>
 
-      <section className="finance-content-grid finance-content-grid--hero">
-        <BalanceHero
-          eyebrow="TOTAL REALISED INCOME"
-          title="Cleared Collections"
-          amount={money(summary.totalIncome)}
-          description="Income recognised after successful financial clearance."
-          icon={<TrendingUp size={30} />}
-          trend={{
-            label: `${summary.transactionCount} cleared transactions`,
-            positive: true,
-          }}
-          variant="green"
-        />
+                    <td>{r.contributor}</td>
 
-        <FinancialSummary
-          title="Income Distribution"
-          subtitle="How GPCC collections are received"
-          items={[
-            {
-              label: "Total Cleared Income",
-              value: money(
-                summary.totalIncome
-              ),
-              tone: "positive",
-            },
-            {
-              label: "Bank Collection",
-              value: money(
-                summary.bankIncome
-              ),
-              tone: "positive",
-            },
-            {
-              label: "Cash Collection",
-              value: money(
-                summary.cashIncome
-              ),
-              tone: "positive",
-            },
-            {
-              label: "Pending Clearance",
-              value: money(
-                summary.pendingIncome
-              ),
-              tone: "warning",
-            },
-          ]}
-        />
-      </section>
+                    <td>
+                      {r.flat_no || "-"}
+                    </td>
 
-      <section className="finance-section-grid">
-        <InsightCard
-          title="Collection Health"
-          description={
-            summary.pendingIncome > 0
-              ? `${money(summary.pendingIncome)} is still awaiting clearance.`
-              : "All recorded income is currently cleared."
-          }
-          variant={
-            summary.pendingIncome > 0
-              ? "warning"
-              : "success"
-          }
-        />
+                    <td>{r.mode}</td>
 
-        <InsightCard
-          title="Collection Mix"
-          description={
-            summary.bankIncome >=
-            summary.cashIncome
-              ? "Most realised income is received through bank and digital channels."
-              : "Cash remains the dominant income collection channel."
-          }
-          variant="info"
-        />
-      </section>
+                    <td>
+                      {r.reference || "-"}
+                    </td>
 
-      <ActivityTimeline
-        title="Recent Income Activity"
-        subtitle="Latest recorded income transactions"
-        items={income
-          .slice(0, 5)
-          .map((row) => ({
-            id: row.id,
-            title:
-              row.source ||
-              row.particulars ||
-              "Income Received",
-            description:
-              row.description ||
-              row.mode ||
-              "Income transaction",
-            amount: money(
-              Number(row.amount || 0)
-            ),
-            date:
-              row.date ||
-              row.income_date ||
-              "-",
-            icon: (
-              <TrendingUp size={16} />
-            ),
-            status:
-              normalize(row.status) ===
-              "cleared"
-                ? "completed"
-                : "pending",
-          }))}
-      />
+                    <td>
+                      {money(Number(r.amount))}
+                    </td>
 
-      <section className="finance-panel">
-        <div className="finance-panel__header">
-          <div>
-            <span className="finance-section-eyebrow">
-              INCOME REGISTER
-            </span>
+                    <td>
+                      <span className="status">
+                        {r.status}
+                      </span>
+                    </td>
 
-            <h3>Income Transactions</h3>
+                    <td>
+                      {!isCleared
+                        ? "No balance impact"
+                        : isCash
+                        ? "Petty Cash +"
+                        : "Bank +"}
+                    </td>
 
-            <p>
-              Complete record of subscriptions,
-              donations and other collections.
-            </p>
-          </div>
-        </div>
+                    <td className="actions">
+                      <button
+                        className="btn secondary"
+                        onClick={() => edit(r)}
+                      >
+                        Edit
+                      </button>
 
-        <DataToolbar
-          searchValue={search}
-          onSearchChange={setSearch}
-        />
+                      <button
+                        className="btn danger"
+                        onClick={() => del(r.id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td
+                  colSpan={9}
+                  className="empty"
+                >
+                  No income entries yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
-        <TransactionTable
-          data={filteredIncome}
-          emptyMessage="No income transactions found."
-          columns={[
-            {
-              key: "date",
-              label: "Date",
-              render: (row) =>
-                row.date ||
-                row.income_date ||
-                "-",
-            },
-            {
-              key: "voucher_no",
-              label: "Voucher No.",
-              render: (row) =>
-                row.voucher_no || "-",
-            },
-            {
-              key: "source",
-              label: "Source",
-              render: (row) =>
-                row.source || "-",
-            },
-            {
-              key: "particulars",
-              label: "Particulars",
-              render: (row) =>
-                row.particulars ||
-                row.description ||
-                "-",
-            },
-            {
-              key: "mode",
-              label: "Mode",
-              render: (row) =>
-                row.mode || "-",
-            },
-            {
-              key: "amount",
-              label: "Amount",
-              align: "right",
-              render: (row) =>
-                money(
-                  Number(row.amount || 0)
-                ),
-            },
-            {
-              key: "status",
-              label: "Status",
-              render: (row) => (
-                <StatusBadge
-                  status={
-                    row.status || "Pending"
-                  }
-                  variant={
-                    normalize(row.status) ===
-                    "cleared"
-                      ? "success"
-                      : "warning"
+      {open && (
+        <div className="modalBg">
+          <div className="modal">
+            <div className="pageHead">
+              <h2>
+                {editing
+                  ? "Edit Income"
+                  : "Add Income"}
+              </h2>
+
+              <button
+                className="btn secondary"
+                onClick={() => setOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="formGrid">
+              <label>
+                Date
+
+                <input
+                  className="input"
+                  type="date"
+                  value={form.date}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      date: e.target.value,
+                    })
                   }
                 />
-              ),
-            },
-          ]}
-        />
-      </section>
-    </main>
+              </label>
+
+              <label>
+                Contributor Name
+
+                <input
+                  className="input"
+                  value={form.contributor}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      contributor: e.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Flat / House No.
+
+                <input
+                  className="input"
+                  value={form.flat_no}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      flat_no: e.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Amount
+
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  value={form.amount}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      amount: e.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Receipt Mode
+
+                <select
+                  className="input"
+                  value={form.mode}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      mode: e.target.value,
+                    })
+                  }
+                >
+                  <option>Cash</option>
+                  <option>Online</option>
+                  <option>UPI</option>
+                  <option>Bank Transfer</option>
+                  <option>Cheque</option>
+                </select>
+              </label>
+
+              <label>
+                Reference / Cheque / UTR / Receipt No.
+
+                <input
+                  className="input"
+                  value={form.reference}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      reference: e.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Status
+
+                <select
+                  className="input"
+                  value={form.status}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      status: e.target.value,
+                    })
+                  }
+                >
+                  <option>Cleared</option>
+                  <option>Pending</option>
+                  <option>Cancelled</option>
+                </select>
+              </label>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <button
+                className="btn"
+                onClick={save}
+              >
+                {editing
+                  ? "Update Entry"
+                  : "Save Entry"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

@@ -1,17 +1,19 @@
-import React from "react";
+"use client";
 
-export interface FinancePageHeaderProps {
+import { ReactNode } from "react";
+
+interface FinancePageHeaderProps {
   eyebrow?: string;
+
   title: string;
+
   description?: string;
 
-  badge?: React.ReactNode;
+  badge?: ReactNode;
 
-  /** Single primary action */
-  action?: React.ReactNode;
+  action?: ReactNode;
 
-  /** Multiple actions */
-  actions?: React.ReactNode;
+  actions?: ReactNode;
 }
 
 export default function FinancePageHeader({
@@ -23,15 +25,18 @@ export default function FinancePageHeader({
   actions,
 }: FinancePageHeaderProps) {
   return (
-    <section className="finance-page-header">
-      <div className="finance-page-header__content">
+    <header className="finance-page-header">
+
+      <div className="finance-page-header-copy">
+
         {eyebrow && (
-          <div className="finance-page-header__eyebrow">
+          <span className="page-eyebrow">
             {eyebrow}
-          </div>
+          </span>
         )}
 
-        <div className="finance-page-header__title-row">
+        <div className="page-title-row">
+
           <div>
             <h1>{title}</h1>
 
@@ -41,19 +46,21 @@ export default function FinancePageHeader({
           </div>
 
           {badge && (
-            <div className="finance-page-header__badge">
+            <div className="page-badge">
               {badge}
             </div>
           )}
+
         </div>
+
       </div>
 
       {(action || actions) && (
-        <div className="finance-page-header__actions">
-          {action}
-          {actions}
+        <div className="finance-page-actions">
+          {action || actions}
         </div>
       )}
-    </section>
+
+    </header>
   );
 }

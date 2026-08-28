@@ -1,10 +1,7 @@
-import React from "react";
+"use client";
 
-export type TransactionStatus =
-  | string;
-
-export interface StatusBadgeProps {
-  status: TransactionStatus;
+interface StatusBadgeProps {
+  status: string;
 
   variant?:
     | "success"
@@ -18,35 +15,27 @@ export default function StatusBadge({
   status,
   variant,
 }: StatusBadgeProps) {
-  const normalizedStatus =
-    String(status)
-      .toLowerCase()
-      .trim();
+  const normalized = status.toLowerCase();
 
-  const autoVariant =
-    normalizedStatus.includes("paid") ||
-    normalizedStatus.includes("cleared") ||
-    normalizedStatus.includes("completed") ||
-    normalizedStatus.includes("live") ||
-    normalizedStatus.includes("received")
+  const detectedVariant =
+    variant ||
+    (normalized.includes("paid") ||
+    normalized.includes("cleared") ||
+    normalized.includes("completed") ||
+    normalized.includes("received")
       ? "success"
-      : normalizedStatus.includes("pending") ||
-        normalizedStatus.includes("processing")
+      : normalized.includes("pending")
       ? "warning"
-      : normalizedStatus.includes("failed") ||
-        normalizedStatus.includes("cancelled") ||
-        normalizedStatus.includes("overdue")
+      : normalized.includes("cancel") ||
+        normalized.includes("failed")
       ? "danger"
-      : "neutral";
-
-  const displayVariant =
-    variant || autoVariant;
+      : "primary");
 
   return (
     <span
-      className={`finance-status-badge finance-status-badge--${displayVariant}`}
+      className={`finance-status-badge status-${detectedVariant}`}
     >
-      <span className="finance-status-badge__dot" />
+      <span className="status-dot" />
 
       {status}
     </span>
