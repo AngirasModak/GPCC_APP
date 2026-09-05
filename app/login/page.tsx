@@ -6,7 +6,15 @@ import {supabase} from "../../lib/supabase";
 export default function Login(){
  const router=useRouter(); const[email,setEmail]=useState(""); const[password,setPassword]=useState(""); const[fullName,setFullName]=useState("");
  const[signupMode,setSignupMode]=useState(false); const[msg,setMsg]=useState(""); const[busy,setBusy]=useState(false);
- useEffect(()=>{supabase.auth.getUser().then(async({data:{user}})=>{if(!user)return; const {data}=await supabase.from("profiles").select("status").eq("id",user.id).maybeSingle(); if(data?.status==="Approved")router.replace("/dashboard");});},[router]);
+ useEffect(()=>{
+  let active=true;
+  supabase.auth.getUser().then(async({data:{user}})=>{
+    if(!active || !user) return;
+    const {data}=await supabase.from("profiles").select("status").eq("id",user.id).maybeSingle();
+    if(active && data?.status==="Approved") router.replace("/dashboard");
+  });
+  return ()=>{active=false;};
+},[router]);
  const login=async()=>{setBusy(true);setMsg(""); const{data,error}=await supabase.auth.signInWithPassword({email,password}); if(error){setMsg(error.message);setBusy(false);return;} const {data:profile}=await supabase.from("profiles").select("status").eq("id",data.user.id).maybeSingle(); if(profile?.status!=="Approved"){await supabase.auth.signOut();setMsg("Account is pending administrator approval. No application data is available until approval.");setBusy(false);return;} router.replace("/dashboard");router.refresh();};
  const signup=async()=>{setBusy(true);setMsg(""); const{data,error}=await supabase.auth.signUp({email,password,options:{data:{full_name:fullName}}}); if(error){setMsg(error.message);setBusy(false);return;} if(data.session) await supabase.auth.signOut(); setMsg("Signup submitted. Your account will remain locked until an administrator approves it.");setBusy(false);};
  return <div className="account-page"><div className="account-card">

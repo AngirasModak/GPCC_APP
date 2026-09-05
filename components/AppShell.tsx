@@ -17,39 +17,79 @@ const items = [
   ["/admin","👥","Administration",["Administrator"]],
 ] as const;
 
+function Gate({message}:{message?:string}){
+  return <div className="auth-only"><div className="auth-brand"><h1>GREENWOOD PARK</h1><p>{message || "Secure Account Access"}</p></div></div>;
+}
+
 export default function AppShell({children}:{children:React.ReactNode}){
-  const pathname=usePathname(); const router=useRouter();
-  const [ready,setReady]=useState(false); const [profile,setProfile]=useState<Profile|null>(null); const [email,setEmail]=useState("");
+  const pathname=usePathname();
+  const router=useRouter();
+  const [ready,setReady]=useState(false);
+  const [profile,setProfile]=useState<Profile|null>(null);
+  const [email,setEmail]=useState("");
 
   useEffect(()=>{
     let active=true;
     const load=async()=>{
       const {data:{user}}=await supabase.auth.getUser();
       if(!active) return;
-      if(!user){ setProfile(null); setReady(true); return; }
+      if(!user){ setProfile(null); setEmail(""); setReady(true); return; }
+
       setEmail(user.email||"");
-      const {data}=await supabase.from("profiles").select("full_name,role,status").eq("id",user.id).maybeSingle();
+      const {data}=await supabase
+        .from("profiles")
+        .select("full_name,role,status")
+        .eq("id",user.id)
+        .maybeSingle();
       if(!active) return;
-      setProfile(data as Profile|null); setReady(true);
+      setProfile(data as Profile|null);
+      setReady(true);
     };
+
     load();
     const {data:listener}=supabase.auth.onAuthStateChange(()=>load());
     return ()=>{active=false; listener.subscription.unsubscribe();};
   },[]);
 
-  const logout=async()=>{await supabase.auth.signOut(); router.replace("/login"); router.refresh();};
+  // Never render the protected shell while the login route is active.
+  // If an already-authenticated approved user reaches /login, redirect to
+  // the dashboard without ever rendering the finance navigation around it.
+  useEffect(()=>{
+    if(!ready || pathname!=="/login") return;
+    if(profile?.status==="Approved") router.replace("/dashboard");
+  },[ready, pathname, profile, router]);
 
-  // Unauthenticated and unapproved users see only the Account surface.
-  if(!ready) return <div className="auth-only"><div className="auth-brand"><h1>GREENWOOD PARK</h1><p>Account</p></div></div>;
+  const logout=async()=>{
+    await supabase.auth.signOut();
+    setProfile(null);
+    setReady(false);
+    router.replace("/login");
+    router.refresh();
+  };
+
+  // /login is an isolated public account surface. The protected application
+  // layout is NEVER mounted around it, even when a stale/active session exists.
+  if(pathname==="/login"){
+    if(!ready) return <Gate message="Loading secure account access…"/>;
+    if(profile?.status==="Approved") return <Gate message="Authenticated — opening GPCC Finance…"/>;
+    return <>{children}</>;
+  }
+
+  // Protected routes: middleware is the first line of defence; this client
+  // gate prevents accidental UI exposure while the session/profile resolves.
+  if(!ready) return <Gate message="Verifying secure account access…"/>;
   if(!profile || profile.status!=="Approved"){
-    if(pathname!=="/login") router.replace("/login");
-    return <div className="auth-only"><div className="auth-brand"><h1>GREENWOOD PARK</h1><p>Secure Account Access</p></div>{children}</div>;
+    router.replace("/login");
+    return <Gate message="Authentication required"/>;
   }
 
   const allowed=items.filter(i=>(i[3] as readonly string[]).includes(profile.role));
-  const isApplicationRoute=pathname!=="/login";
-  const canViewRoute=pathname==="/dashboard" || allowed.some(i=>i[0]===pathname);
-  if(isApplicationRoute && !canViewRoute) return <div className="auth-only"><div className="auth-brand"><h1>GREENWOOD PARK</h1><p>Access restricted</p><p className="muted">Your current privilege does not permit this section.</p></div></div>;
+  const canViewRoute=allowed.some(i=>i[0]===pathname);
+  if(!canViewRoute){
+    router.replace("/dashboard");
+    return <Gate message="Opening your authorized workspace…"/>;
+  }
+
   return <div className="shell">
     <aside className="side"><div className="brand"><h1>GREENWOOD PARK</h1><p>Cultural Finance Portal</p></div>
       <nav className="nav">{allowed.map(([href,icon,label])=><Link key={href} href={href} style={pathname===href?{background:"#ffffff1c"}:{}}>{icon} <span>{label}</span></Link>)}</nav>
