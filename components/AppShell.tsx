@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
@@ -17,82 +17,98 @@ const items = [
   ["/admin","👥","Administration",["Administrator"]],
 ] as const;
 
-function Gate({message}:{message?:string}){
+function Gate({message}:{message?:string}) {
   return <div className="auth-only"><div className="auth-brand"><h1>GREENWOOD PARK</h1><p>{message || "Secure Account Access"}</p></div></div>;
 }
 
-export default function AppShell({children}:{children:React.ReactNode}){
-  const pathname=usePathname();
-  const router=useRouter();
-  const [ready,setReady]=useState(false);
-  const [profile,setProfile]=useState<Profile|null>(null);
-  const [email,setEmail]=useState("");
+export default function AppShell({children}:{children:React.ReactNode}) {
+  const pathname = usePathname();
+  const [ready, setReady] = useState(false);
+  const [profile, setProfile] = useState<Profile|null>(null);
+  const [email, setEmail] = useState("");
 
-  useEffect(()=>{
-    let active=true;
-    const load=async()=>{
-      const {data:{user}}=await supabase.auth.getUser();
-      if(!active) return;
-      if(!user){ setProfile(null); setEmail(""); setReady(true); return; }
+  useEffect(() => {
+    let cancelled = false;
 
-      setEmail(user.email||"");
-      const {data}=await supabase
+    const loadProfile = async (userId: string, userEmail?: string) => {
+      const { data, error } = await supabase
         .from("profiles")
         .select("full_name,role,status")
-        .eq("id",user.id)
+        .eq("id", userId)
         .maybeSingle();
-      if(!active) return;
-      setProfile(data as Profile|null);
+      if (cancelled) return;
+      setEmail(userEmail || "");
+      setProfile(error ? null : (data as Profile|null));
       setReady(true);
     };
 
-    load();
-    const {data:listener}=supabase.auth.onAuthStateChange(()=>load());
-    return ()=>{active=false; listener.subscription.unsubscribe();};
-  },[]);
+    const bootstrap = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (!session) {
+        setProfile(null);
+        setEmail("");
+        setReady(true);
+        return;
+      }
+      setReady(false);
+      await loadProfile(session.user.id, session.user.email);
+    };
 
-  // Never render the protected shell while the login route is active.
-  // If an already-authenticated approved user reaches /login, redirect to
-  // the dashboard without ever rendering the finance navigation around it.
-  useEffect(()=>{
-    if(!ready || pathname!=="/login") return;
-    if(profile?.status==="Approved") router.replace("/dashboard");
-  },[ready, pathname, profile, router]);
+    bootstrap();
 
-  const logout=async()=>{
+    // Do not call Supabase APIs directly inside onAuthStateChange. Supabase
+    // holds an internal auth lock during callbacks; doing so can deadlock the UI.
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setTimeout(() => {
+        if (cancelled) return;
+        if (!session) {
+          setProfile(null);
+          setEmail("");
+          setReady(true);
+        } else {
+          setReady(false);
+          loadProfile(session.user.id, session.user.email);
+        }
+      }, 0);
+    });
+
+    return () => { cancelled = true; listener.subscription.unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    if (pathname !== "/login" || !ready || profile?.status !== "Approved") return;
+    window.location.replace("/dashboard");
+  }, [pathname, ready, profile]);
+
+  const logout = async () => {
     await supabase.auth.signOut();
-    setProfile(null);
-    setReady(false);
-    router.replace("/login");
-    router.refresh();
+    window.location.replace("/login");
   };
 
-  // /login is an isolated public account surface. The protected application
-  // layout is NEVER mounted around it, even when a stale/active session exists.
-  if(pathname==="/login"){
-    if(!ready) return <Gate message="Loading secure account access…"/>;
-    if(profile?.status==="Approved") return <Gate message="Authenticated — opening GPCC Finance…"/>;
+  // The login route is never rendered inside the protected finance shell.
+  if (pathname === "/login") {
+    if (!ready) return <Gate message="Verifying secure account access…" />;
+    if (profile?.status === "Approved") return <Gate message="Authenticated — opening GPCC Finance…" />;
     return <>{children}</>;
   }
 
-  // Protected routes: middleware is the first line of defence; this client
-  // gate prevents accidental UI exposure while the session/profile resolves.
-  if(!ready) return <Gate message="Verifying secure account access…"/>;
-  if(!profile || profile.status!=="Approved"){
-    router.replace("/login");
-    return <Gate message="Authentication required"/>;
+  if (!ready) return <Gate message="Verifying secure account access…" />;
+  if (!profile || profile.status !== "Approved") {
+    window.location.replace("/login");
+    return <Gate message="Authentication required" />;
   }
 
-  const allowed=items.filter(i=>(i[3] as readonly string[]).includes(profile.role));
-  const canViewRoute=allowed.some(i=>i[0]===pathname);
-  if(!canViewRoute){
-    router.replace("/dashboard");
-    return <Gate message="Opening your authorized workspace…"/>;
+  const allowed = items.filter(i => (i[3] as readonly string[]).includes(profile.role));
+  const canViewRoute = allowed.some(i => i[0] === pathname);
+  if (!canViewRoute) {
+    window.location.replace("/dashboard");
+    return <Gate message="Opening your authorized workspace…" />;
   }
 
   return <div className="shell">
     <aside className="side"><div className="brand"><h1>GREENWOOD PARK</h1><p>Cultural Finance Portal</p></div>
-      <nav className="nav">{allowed.map(([href,icon,label])=><Link key={href} href={href} style={pathname===href?{background:"#ffffff1c"}:{}}>{icon} <span>{label}</span></Link>)}</nav>
+      <nav className="nav">{allowed.map(([href,icon,label]) => <Link key={href} href={href} style={pathname===href?{background:"#ffffff1c"}:{}}>{icon} <span>{label}</span></Link>)}</nav>
     </aside>
     <main className="main"><div className="topbar"><div><b>Greenwood Park Cultural Committee</b><div className="muted">Centralized Finance & Governance</div></div>
       <div className="account-area"><span className="role-badge">{profile.role}</span><span className="account-user">{profile.full_name||email}</span><button className="btn secondary" onClick={logout}>Logout</button></div>

@@ -57,3 +57,6 @@ For the first deployment, create one account through Sign Up. In Supabase, appro
 After that, all subsequent accounts should be approved through the application's administration workflow.
 
 > Do not expose the Supabase service-role key to the browser. This project intentionally uses the public anon key on the client and relies on RLS.
+
+## Authentication transition fix (V4)
+The client no longer performs Supabase calls inside `onAuthStateChange`. Supabase auth callbacks can hold an internal lock, so database/session calls from inside that callback can leave the application on an endless authenticated loading screen. Profile loading is deferred with `setTimeout(0)`, and successful authentication uses a hard browser navigation to `/dashboard` to discard any stale unauthenticated client tree.
