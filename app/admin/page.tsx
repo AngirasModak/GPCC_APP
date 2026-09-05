@@ -862,6 +862,7 @@ export default function AdministrationPage() {
               </div>
             <div className="resident-directory"><div className="admin-category-library-head"><div><h4>Residential directory</h4><p>Only active records are available for new income entries.</p></div></div>{residentialUnits.length === 0 ? <div className="category-empty"><div>⌂</div><b>No residences configured</b><span>Add a Flat / House No. or import your directory.</span></div> : <div className="resident-grid">{residentialUnits.map(r => <div className={`resident-item ${!r.is_active ? "archived" : ""}`} key={r.id}><div className="resident-item-top"><div className="resident-flat">{r.flat_no}<span className={`flat-type-badge flat-type-${(r.flat_type || "unknown").toLowerCase()}`}>{r.flat_type || "Unclassified"}</span></div><span className={`category-status ${r.is_active ? "active" : "archived"}`}>{r.is_active ? "Active" : "Archived"}</span></div><b>{r.owner_name}</b><small>{r.has_tenant ? `Tenant · ${r.tenant_name}` : "Owner occupied"}</small><div className="account-row-actions"><button className="btn secondary small-btn" disabled={busy} onClick={() => startEditResident(r)}>Edit</button>{r.is_active && <button className="btn danger small-btn" disabled={busy} onClick={() => archiveResident(r.id)}>Archive</button>}</div></div>)}</div>}</div>
           </div>
+          </div>
         </section>
       ) : tab === "permissions" ? (
         <section className="admin-section">
