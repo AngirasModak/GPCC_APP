@@ -979,3 +979,98 @@ insert into public.permission_catalog(module,action) values ('category_setup','m
 insert into public.role_permissions(role,module,action) values ('Administrator','category_setup','manage') on conflict do nothing;
 
 commit;
+
+-- V20: Residential / Flat-House master
+create table if not exists public.residential_units (
+  id uuid primary key default gen_random_uuid(),
+  flat_no text not null,
+  owner_name text not null,
+  has_tenant boolean not null default false,
+  tenant_name text,
+  is_active boolean not null default true,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint residential_units_flat_no_key unique (flat_no),
+  constraint residential_units_tenant_check check (has_tenant = false or nullif(trim(tenant_name), '') is not null)
+);
+
+alter table public.residential_units add column if not exists flat_type text;
+alter table public.residential_units drop constraint if exists residential_units_flat_type_check;
+alter table public.residential_units add constraint residential_units_flat_type_check check (flat_type is null or flat_type in ('LIG','MIG','HIG'));
+create index if not exists idx_residential_units_active_type_flat on public.residential_units(is_active, flat_type, flat_no);
+
+create index if not exists idx_residential_units_active_flat on public.residential_units(is_active, flat_no);
+
+alter table public.residential_units enable row level security;
+drop policy if exists residential_units_select_authenticated on public.residential_units;
+create policy residential_units_select_authenticated on public.residential_units
+for select to authenticated using (is_active = true or public.has_permission('users','manage'));
+
+drop policy if exists residential_units_admin_write on public.residential_units;
+create policy residential_units_admin_write on public.residential_units
+for all to authenticated
+using (public.has_permission('users','manage'))
+with check (public.has_permission('users','manage'));
+
+drop function if exists public.admin_upsert_residential_unit(uuid,text,text,boolean,text,boolean);
+
+create or replace function public.admin_upsert_residential_unit(
+  p_id uuid,
+  p_flat_no text,
+  p_owner_name text,
+  p_flat_type text,
+  p_has_tenant boolean,
+  p_tenant_name text,
+  p_is_active boolean
+) returns public.residential_units
+language plpgsql security definer set search_path = public
+as $$
+declare r public.residential_units;
+begin
+  if not public.has_permission('users','manage') then raise exception 'Administrator permission required'; end if;
+  if p_id is not null and p_flat_no is null then
+    -- Archive path: classification does not need to be supplied.
+  elsif upper(trim(coalesce(p_flat_type,''))) not in ('LIG','MIG','HIG') then
+    raise exception 'Flat Type must be LIG, MIG or HIG';
+  end if;
+  if p_id is null then
+    insert into public.residential_units(flat_no,owner_name,flat_type,has_tenant,tenant_name,is_active,created_by)
+    values(trim(p_flat_no),trim(p_owner_name),upper(trim(p_flat_type)),coalesce(p_has_tenant,false),nullif(trim(p_tenant_name),''),coalesce(p_is_active,true),auth.uid())
+    returning * into r;
+  elsif p_flat_no is null then
+    update public.residential_units set is_active=false,updated_at=now() where id=p_id returning * into r;
+  else
+    update public.residential_units set flat_no=trim(p_flat_no),owner_name=trim(p_owner_name),flat_type=upper(trim(p_flat_type)),has_tenant=coalesce(p_has_tenant,false),tenant_name=nullif(trim(p_tenant_name),''),is_active=coalesce(p_is_active,true),updated_at=now() where id=p_id returning * into r;
+  end if;
+  if r.id is null then raise exception 'Residential record not found'; end if;
+  return r;
+end;
+$$;
+revoke all on function public.admin_upsert_residential_unit(uuid,text,text,text,boolean,text,boolean) from public;
+grant execute on function public.admin_upsert_residential_unit(uuid,text,text,text,boolean,text,boolean) to authenticated;
+
+create or replace function public.admin_import_residential_units(p_rows jsonb)
+returns integer language plpgsql security definer set search_path = public
+as $$
+declare item jsonb; n integer := 0; flat text; owner text; tenant text; ht boolean;
+begin
+  if not public.has_permission('users','manage') then raise exception 'Administrator permission required'; end if;
+  if jsonb_typeof(p_rows) <> 'array' then raise exception 'Import rows must be an array'; end if;
+  for item in select * from jsonb_array_elements(p_rows) loop
+    flat := trim(coalesce(item->>'flat_no','')); owner := trim(coalesce(item->>'owner_name',''));
+    -- Flat classification is required for new/updated imports.
+    if upper(trim(coalesce(item->>'flat_type',''))) not in ('LIG','MIG','HIG') then raise exception 'Flat Type must be LIG, MIG or HIG for %', flat; end if;
+    ht := coalesce((item->>'has_tenant')::boolean,false); tenant := nullif(trim(coalesce(item->>'tenant_name','')),'');
+    if flat = '' or owner = '' then raise exception 'Flat / House No. and Owner Name are required'; end if;
+    if ht and tenant is null then raise exception 'Tenant Name is required when Tenant is Yes for %', flat; end if;
+    insert into public.residential_units(flat_no,owner_name,flat_type,has_tenant,tenant_name,is_active,created_by)
+    values(flat,owner,upper(trim(item->>'flat_type')),ht,tenant,true,auth.uid())
+    on conflict(flat_no) do update set owner_name=excluded.owner_name,flat_type=excluded.flat_type,has_tenant=excluded.has_tenant,tenant_name=excluded.tenant_name,is_active=true,updated_at=now();
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+revoke all on function public.admin_import_residential_units(jsonb) from public;
+grant execute on function public.admin_import_residential_units(jsonb) to authenticated;

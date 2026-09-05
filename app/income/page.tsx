@@ -13,6 +13,8 @@ type Row = {
   reference: string;
   status: string;
 };
+type FlatType = "LIG" | "MIG" | "HIG";
+type ResidentialUnit = { id: string; flat_no: string; flat_type: FlatType | null; owner_name: string; has_tenant: boolean; tenant_name: string | null; is_active: boolean };
 
 const initial = {
   date: new Date().toISOString().slice(0, 10),
@@ -37,6 +39,8 @@ export default function Income() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  const [residences, setResidences] = useState<ResidentialUnit[]>([]);
+  const [flatTypeFilter, setFlatTypeFilter] = useState<FlatType | "">("");
 
   const load = async () => {
     setMsg("");
@@ -56,7 +60,27 @@ export default function Income() {
 
   useEffect(() => {
     load();
+    loadResidences();
   }, []);
+
+  const loadResidences = async () => {
+    const { data } = await supabase.from("residential_units").select("id,flat_no,flat_type,owner_name,has_tenant,tenant_name,is_active").eq("is_active", true).order("flat_no");
+    setResidences((data || []) as ResidentialUnit[]);
+  };
+
+  const filteredResidences = flatTypeFilter ? residences.filter((r) => r.flat_type === flatTypeFilter) : residences;
+
+  const onFlatTypeChange = (type: FlatType | "") => {
+    setFlatTypeFilter(type);
+    if (form.flat_no && type && !residences.some((r) => r.flat_no === form.flat_no && r.flat_type === type)) {
+      setForm({ ...form, flat_no: "" });
+    }
+  };
+
+  const onFlatChange = (flat: string) => {
+    const unit = residences.find(r => r.flat_no === flat);
+    setForm({ ...form, flat_no: flat, contributor: unit ? (unit.has_tenant && unit.tenant_name ? unit.tenant_name : unit.owner_name) : form.contributor });
+  };
 
   const save = async () => {
     if (!form.contributor || !form.amount) {
@@ -399,18 +423,24 @@ export default function Income() {
               </label>
 
               <label>
-                Flat / House No.
+                Flat Category
+                <select className="input" value={flatTypeFilter} onChange={(e) => onFlatTypeChange(e.target.value as FlatType | "")}>
+                  <option value="">All Flat Categories</option>
+                  <option value="LIG">LIG</option>
+                  <option value="MIG">MIG</option>
+                  <option value="HIG">HIG</option>
+                </select>
+                <small className="muted">Choose LIG, MIG or HIG to filter the Flat / House list.</small>
+              </label>
 
-                <input
-                  className="input"
-                  value={form.flat_no}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      flat_no: e.target.value,
-                    })
-                  }
-                />
+              <label>
+                Flat / House No.
+                <select className="input" value={form.flat_no} onChange={(e) => onFlatChange(e.target.value)} disabled={!residences.length}>
+                  <option value="">{flatTypeFilter ? `Select ${flatTypeFilter} Flat / House` : "Select Flat / House No."}</option>
+                  {filteredResidences.map((r) => <option key={r.id} value={r.flat_no}>{r.flat_no} — {r.has_tenant && r.tenant_name ? r.tenant_name : r.owner_name}</option>)}
+                </select>
+                {residences.length === 0 && <small className="muted">No active residences configured. Ask an Administrator to add/import the Flat / House Directory.</small>}
+                {residences.length > 0 && filteredResidences.length === 0 && <small className="muted">No active flats are configured for {flatTypeFilter}.</small>}
               </label>
 
               <label>

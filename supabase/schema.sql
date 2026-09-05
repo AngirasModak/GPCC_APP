@@ -905,3 +905,20 @@ begin
 end; $$;
 revoke all on function public.admin_update_profile(uuid,text,public.gpcc_role,public.account_status) from public;
 grant execute on function public.admin_update_profile(uuid,text,public.gpcc_role,public.account_status) to authenticated;
+
+
+-- V20 Residential / Flat-House master
+create table if not exists public.residential_units (
+  id uuid primary key default gen_random_uuid(),
+  flat_no text not null unique,
+  flat_type text check (flat_type is null or flat_type in ('LIG','MIG','HIG')),
+  owner_name text not null,
+  has_tenant boolean not null default false,
+  tenant_name text,
+  is_active boolean not null default true,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint residential_units_tenant_check check (has_tenant = false or nullif(trim(tenant_name), '') is not null)
+);
+alter table public.residential_units enable row level security;

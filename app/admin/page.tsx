@@ -43,6 +43,8 @@ type BankAccount = {
 
 type CashAccount = BankAccount;
 type ExpenseCategory = { id: string; name: string; description: string | null; is_active: boolean; sort_order: number; created_at: string };
+type FlatType = "LIG" | "MIG" | "HIG";
+type ResidentialUnit = { id: string; flat_no: string; owner_name: string; flat_type: FlatType | null; has_tenant: boolean; tenant_name: string | null; is_active: boolean; created_at: string; updated_at: string };
 
 type Permission = {
   role: Role;
@@ -117,6 +119,12 @@ export default function AdministrationPage() {
   const [banks, setBanks] = useState<BankAccount[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
+  const [residentialUnits, setResidentialUnits] = useState<ResidentialUnit[]>([]);
+  const [residentForm, setResidentForm] = useState({ flat_no: "", owner_name: "", flat_type: "" as FlatType | "", has_tenant: false, tenant_name: "", is_active: true });
+  const [editingResident, setEditingResident] = useState<string | null>(null);
+  const [residentFile, setResidentFile] = useState<File | null>(null);
+  const [residentImportPreview, setResidentImportPreview] = useState<Array<{ flat_no: string; flat_type: FlatType; owner_name: string; has_tenant: boolean; tenant_name: string | null }>>([]);
+  const [residentPanel, setResidentPanel] = useState<"property" | "flatType" | "occupancy">("property");
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -166,7 +174,7 @@ export default function AdministrationPage() {
         setSchemaWarning("");
       }
 
-      const [permissionsResult, customRolesResult, customPermissionsResult, banksResult, cashResult, categoriesResult, auditResult] = await Promise.all([
+      const [permissionsResult, customRolesResult, customPermissionsResult, banksResult, cashResult, categoriesResult, residentialResult, auditResult] = await Promise.all([
         supabase
           .from("role_permissions")
           .select("role,module,action")
@@ -196,6 +204,10 @@ export default function AdministrationPage() {
           .select("id,name,description,is_active,sort_order,created_at")
           .order("sort_order", { ascending: true })
           .order("name", { ascending: true }),
+        supabase
+          .from("residential_units")
+          .select("id,flat_no,owner_name,flat_type,has_tenant,tenant_name,is_active,created_at,updated_at")
+          .order("flat_no"),
         supabase
           .from("audit_logs")
           .select("id,occurred_at,actor_id,action,entity_type,entity_id,old_data,new_data,metadata")
@@ -227,6 +239,7 @@ export default function AdministrationPage() {
         banksResult.error ||
         cashResult.error ||
         categoriesResult.error ||
+        residentialResult.error ||
         resolvedAuditResult.error;
       if (firstError) throw new Error(firstError.message);
 
@@ -240,6 +253,7 @@ export default function AdministrationPage() {
       setBanks((banksResult.data || []) as BankAccount[]);
       setCashAccounts((cashResult.data || []) as CashAccount[]);
       setExpenseCategories((categoriesResult.data || []) as ExpenseCategory[]);
+      setResidentialUnits((residentialResult.data || []) as ResidentialUnit[]);
       setAuditLogs((resolvedAuditResult.data || []) as AuditLog[]);
     } catch (e: any) {
       setError(e.message || "Unable to load administration data.");
@@ -545,6 +559,98 @@ export default function AdministrationPage() {
 
   const renderStatus = (status: Status) => <span className={`admin-status admin-${status.toLowerCase()}`}>{status}</span>;
 
+  const submitResident = async () => {
+    clearFeedback();
+    const flat_no = residentForm.flat_no.trim();
+    const owner_name = residentForm.owner_name.trim();
+    const flat_type = residentForm.flat_type;
+    const tenant_name = residentForm.tenant_name.trim();
+    if (!flat_no || !owner_name) { setError("Flat / House No. and Owner Name are required."); return; }
+    if (!flat_type) { setError("Flat Type is required. Select LIG, MIG or HIG."); return; }
+    if (residentForm.has_tenant && !tenant_name) { setError("Tenant Name is required when Tenant is Yes."); return; }
+    setBusy(true);
+    try {
+      const { error } = await supabase.rpc("admin_upsert_residential_unit", {
+        p_id: editingResident,
+        p_flat_no: flat_no,
+        p_owner_name: owner_name,
+        p_flat_type: flat_type,
+        p_has_tenant: residentForm.has_tenant,
+        p_tenant_name: residentForm.has_tenant ? tenant_name : null,
+        p_is_active: residentForm.is_active,
+      });
+      if (error) throw new Error(error.message);
+      setMessage(editingResident ? "Residential record updated." : "Flat / House No. added.");
+      setEditingResident(null);
+      setResidentForm({ flat_no: "", owner_name: "", flat_type: "", has_tenant: false, tenant_name: "", is_active: true });
+      await loadAll();
+    } catch (e: any) { setError(e?.message || "Unable to save residential record."); }
+    finally { setBusy(false); }
+  };
+
+  const startEditResident = (r: ResidentialUnit) => {
+    setEditingResident(r.id);
+    setResidentForm({ flat_no: r.flat_no, owner_name: r.owner_name, flat_type: r.flat_type || "", has_tenant: r.has_tenant, tenant_name: r.tenant_name || "", is_active: r.is_active });
+  };
+
+  const archiveResident = async (id: string) => {
+    if (!confirm("Archive this Flat / House No.? Historical income entries will remain unchanged.")) return;
+    setBusy(true); clearFeedback();
+    try {
+      const { error } = await supabase.rpc("admin_upsert_residential_unit", { p_id: id, p_flat_no: null, p_owner_name: null, p_flat_type: null, p_has_tenant: null, p_tenant_name: null, p_is_active: false });
+      if (error) throw new Error(error.message);
+      setMessage("Residential record archived."); await loadAll();
+    } catch (e: any) { setError(e?.message || "Unable to archive residential record."); }
+    finally { setBusy(false); }
+  };
+
+  const downloadResidentTemplate = async () => {
+    const XLSX = await import("xlsx");
+    const ws = XLSX.utils.json_to_sheet([
+      { "Flat / House No.": "A-101", "Flat Type": "MIG", "Owner Name": "Example Owner", "Tenant Yes/No": "No", "Tenant Name": "" },
+      { "Flat / House No.": "A-102", "Flat Type": "LIG", "Owner Name": "Example Owner 2", "Tenant Yes/No": "Yes", "Tenant Name": "Example Tenant" },
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Residential Directory");
+    XLSX.writeFile(wb, "GPCC_Residential_Directory_Template.xlsx");
+  };
+
+  const parseResidentWorkbook = async () => {
+    if (!residentFile) { setError("Choose an Excel file first."); return; }
+    clearFeedback();
+    try {
+      const XLSX = await import("xlsx");
+      const buffer = await residentFile.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const sheetName = wb.SheetNames.find((n: string) => /flat|house|resident|unit/i.test(n)) || wb.SheetNames[0];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheetName], { defval: "" });
+      const normalized = rows.map((r) => {
+        const get = (...keys: string[]) => { const normalizedKeys = keys.map(k => k.trim().toLowerCase().replace(/[^a-z0-9]/g, "")); const hit = Object.keys(r).find(k => normalizedKeys.includes(k.trim().toLowerCase().replace(/[^a-z0-9]/g, ""))); return hit ? String(r[hit] ?? "").trim() : ""; };
+        const tenantFlag = get("tenantyesno", "tenant", "hastenant", "tenantstatus").toLowerCase();
+        const has_tenant = ["yes","y","true","1"].includes(tenantFlag);
+        const tenant_name = get("tenantname");
+        return { flat_no: get("flatno", "flatnumber", "houseno", "housenumber", "unitno"), flat_type: get("flattype", "flatcategory", "category", "type").toUpperCase(), owner_name: get("ownername", "nameofowner", "owner"), has_tenant, tenant_name: has_tenant ? tenant_name || null : null };
+      }).filter(r => r.flat_no && r.owner_name);
+      if (!normalized.length) throw new Error("No valid rows found. Required columns: Flat / House No., Flat Type and Owner Name.");
+      if (normalized.some(r => !["LIG","MIG","HIG"].includes(r.flat_type))) throw new Error("Flat Type must be LIG, MIG or HIG for every row.");
+      if (normalized.some(r => r.has_tenant && !r.tenant_name)) throw new Error("At least one row has Tenant = Yes but no Tenant Name.");
+      setResidentImportPreview(normalized as Array<{ flat_no: string; flat_type: FlatType; owner_name: string; has_tenant: boolean; tenant_name: string | null }>);
+      setMessage(`${normalized.length} residential rows ready for import.`);
+    } catch (e: any) { setError(e?.message || "Unable to read the workbook."); setResidentImportPreview([]); }
+  };
+
+  const commitResidentImport = async () => {
+    if (!residentImportPreview.length) return;
+    setBusy(true); clearFeedback();
+    try {
+      const { error } = await supabase.rpc("admin_import_residential_units", { p_rows: residentImportPreview });
+      if (error) throw new Error(error.message);
+      setMessage(`${residentImportPreview.length} residential records imported.`);
+      setResidentImportPreview([]); setResidentFile(null); await loadAll();
+    } catch (e: any) { setError(e?.message || "Unable to import residential records."); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div className="admin-page">
       <div className="pageHead">
@@ -666,6 +772,33 @@ export default function AdministrationPage() {
                 </div>
               </div>
             </div>
+          </div>
+
+          <div className="card admin-resident-card">
+            <div className="admin-category-hero">
+              <div className="admin-category-hero-icon">⌂</div>
+              <div className="admin-category-hero-copy"><div className="excel-kicker">RESIDENTIAL MASTER</div><h3>Flat / House Directory</h3><p>Maintain the controlled list of GPCC flats and houses, owners and tenant occupancy. This list powers the Income dropdown.</p></div>
+              <div className="admin-category-metrics"><div><strong>{residentialUnits.length}</strong><span>Total</span></div><div className="active"><strong>{residentialUnits.filter(r => r.is_active).length}</strong><span>Active</span></div><div><strong>{residentialUnits.filter(r => r.has_tenant && r.is_active).length}</strong><span>Tenanted</span></div></div>
+            </div>
+            <div className="admin-category-body">
+              <div className="admin-category-editor">
+                <div className="admin-category-editor-head"><div><span className="admin-form-step">01</span><div><h4>{editingResident ? "Edit residence" : "Add Flat / House"}</h4><p>Owner information is the master record; tenant details are conditional.</p></div></div>{editingResident && <span className="impact-chip">Editing</span>}</div>
+                <div className="admin-category-field-grid">
+                  <label><span>Flat / House No.</span><input className="input" placeholder="e.g. A-101" value={residentForm.flat_no} onChange={e => setResidentForm({ ...residentForm, flat_no: e.target.value })}/></label>
+                  <label><span>Name of Owner</span><input className="input" placeholder="e.g. Mr. Sharma" value={residentForm.owner_name} onChange={e => setResidentForm({ ...residentForm, owner_name: e.target.value })}/></label>
+                </div>
+                <div className="resident-panel-tabs"><button type="button" className={residentPanel === "property" ? "active" : ""} onClick={() => setResidentPanel("property")}>⌂ Property & Owner</button><button type="button" className={residentPanel === "flatType" ? "active" : ""} onClick={() => setResidentPanel("flatType")}>▦ Flat Type</button><button type="button" className={residentPanel === "occupancy" ? "active" : ""} onClick={() => setResidentPanel("occupancy")}>♙ Tenant / Occupancy</button></div>
+                {residentPanel === "flatType" && <div className="tenant-panel flat-type-panel"><div><b>Residential classification</b><small>Select the official GPCC housing category for this unit.</small></div><label><span>Flat Type</span><select className="input" value={residentForm.flat_type} onChange={e => setResidentForm({ ...residentForm, flat_type: e.target.value as FlatType })}><option value="">Select Flat Type</option><option value="LIG">LIG</option><option value="MIG">MIG</option><option value="HIG">HIG</option></select></label><div className="flat-type-info"><span>LIG</span><small>Low Income Group</small><span>MIG</span><small>Middle Income Group</small><span>HIG</span><small>High Income Group</small></div></div>}
+                {residentPanel === "occupancy" && <div className="tenant-panel"><div><b>Is this unit currently tenanted?</b><small>Choose Yes to maintain the current tenant name.</small></div><div className="admin-segment"><button type="button" className={!residentForm.has_tenant ? "active" : ""} onClick={() => setResidentForm({ ...residentForm, has_tenant: false, tenant_name: "" })}>No</button><button type="button" className={residentForm.has_tenant ? "active" : ""} onClick={() => setResidentForm({ ...residentForm, has_tenant: true })}>Yes</button></div>{residentForm.has_tenant && <label><span>Tenant Name</span><input className="input" placeholder="Enter current tenant name" value={residentForm.tenant_name} onChange={e => setResidentForm({ ...residentForm, tenant_name: e.target.value })}/></label>}</div>}
+                <label className="category-active-toggle"><input type="checkbox" checked={residentForm.is_active} onChange={e => setResidentForm({ ...residentForm, is_active: e.target.checked })}/><span><b>Active residence</b><small>Available in the Income Flat / House dropdown</small></span></label>
+                <div className="actions category-actions"><button className="btn" disabled={busy} onClick={submitResident}>{editingResident ? "Save Changes" : "Add Residence"}</button>{editingResident && <button className="btn secondary" disabled={busy} onClick={() => {setEditingResident(null);setResidentForm({flat_no:"",owner_name:"",flat_type:"",has_tenant:false,tenant_name:"",is_active:true});}}>Cancel</button>}</div>
+              </div>
+              <div className="admin-category-library">
+                <div className="admin-category-library-head"><div><h4>Import residences</h4><p>Upload an Excel workbook with Flat / House No., Flat Type, Owner Name, Tenant Yes/No and Tenant Name.</p></div></div>
+                <div className="resident-import-box"><div className="resident-import-head"><div><b>Bulk import</b><small>Required: Flat / House No., Flat Type (LIG/MIG/HIG) and Owner Name. Optional occupancy fields: Tenant Yes/No and Tenant Name.</small></div><button className="btn secondary small-btn" type="button" onClick={downloadResidentTemplate}>Download Template</button></div><input type="file" accept=".xlsx,.xls" onChange={e => {setResidentFile(e.target.files?.[0] || null);setResidentImportPreview([])}}/><div className="actions"><button className="btn secondary" disabled={!residentFile || busy} onClick={parseResidentWorkbook}>Validate Workbook</button>{residentImportPreview.length > 0 && <button className="btn" disabled={busy} onClick={commitResidentImport}>Import {residentImportPreview.length} Rows</button>}</div>{residentImportPreview.length > 0 && <div className="resident-preview"><b>{residentImportPreview.length} rows validated</b><div className="tableWrap"><table className="table"><thead><tr><th>Flat / House</th><th>Type</th><th>Owner</th><th>Tenant</th><th>Tenant Name</th></tr></thead><tbody>{residentImportPreview.slice(0,8).map((r,i)=><tr key={i}><td>{r.flat_no}</td><td><span className="flat-type-badge">{r.flat_type || "—"}</span></td><td>{r.owner_name}</td><td>{r.has_tenant ? "Yes" : "No"}</td><td>{r.tenant_name || "—"}</td></tr>)}</tbody></table></div>{residentImportPreview.length>8 && <small>Showing first 8 rows.</small>}</div>}</div>
+              </div>
+            </div>
+            <div className="resident-directory"><div className="admin-category-library-head"><div><h4>Residential directory</h4><p>Only active records are available for new income entries.</p></div></div>{residentialUnits.length === 0 ? <div className="category-empty"><div>⌂</div><b>No residences configured</b><span>Add a Flat / House No. or import your directory.</span></div> : <div className="resident-grid">{residentialUnits.map(r => <div className={`resident-item ${!r.is_active ? "archived" : ""}`} key={r.id}><div className="resident-item-top"><div className="resident-flat">{r.flat_no}<span className={`flat-type-badge flat-type-${(r.flat_type || "unknown").toLowerCase()}`}>{r.flat_type || "Unclassified"}</span></div><span className={`category-status ${r.is_active ? "active" : "archived"}`}>{r.is_active ? "Active" : "Archived"}</span></div><b>{r.owner_name}</b><small>{r.has_tenant ? `Tenant · ${r.tenant_name}` : "Owner occupied"}</small><div className="account-row-actions"><button className="btn secondary small-btn" disabled={busy} onClick={() => startEditResident(r)}>Edit</button>{r.is_active && <button className="btn danger small-btn" disabled={busy} onClick={() => archiveResident(r.id)}>Archive</button>}</div></div>)}</div>}</div>
           </div>
         </section>
       ) : tab === "permissions" ? (
