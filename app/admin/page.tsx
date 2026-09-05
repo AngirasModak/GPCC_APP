@@ -162,19 +162,35 @@ export default function AdministrationPage() {
           .limit(250),
       ]);
 
+      // Older production databases may have audit_logs without metadata.
+      // Fall back to the core audit columns so Administration remains usable
+      // even before the compatibility migration is applied.
+      let resolvedAuditResult = auditResult;
+      if (auditResult.error?.message?.toLowerCase().includes("audit_logs.metadata")) {
+        const fallback = await supabase
+          .from("audit_logs")
+          .select("id,occurred_at,actor_id,action,entity_type,entity_id,old_data,new_data")
+          .order("occurred_at", { ascending: false })
+          .limit(250);
+        if (!fallback.error) {
+          resolvedAuditResult = { data: (fallback.data || []).map((row: any) => ({ ...row, metadata: null })), error: null } as typeof auditResult;
+          setSchemaWarning("Your audit log table is from an older GPCC schema. The console is working, but run the V11 production migration to add metadata support.");
+        }
+      }
+
       const firstError =
         profilesResult.error ||
         permissionsResult.error ||
         banksResult.error ||
         cashResult.error ||
-        auditResult.error;
+        resolvedAuditResult.error;
       if (firstError) throw new Error(firstError.message);
 
       setProfiles((profilesResult.data || []) as Profile[]);
       setPermissions((permissionsResult.data || []) as Permission[]);
       setBanks((banksResult.data || []) as BankAccount[]);
       setCashAccounts((cashResult.data || []) as CashAccount[]);
-      setAuditLogs((auditResult.data || []) as AuditLog[]);
+      setAuditLogs((resolvedAuditResult.data || []) as AuditLog[]);
     } catch (e: any) {
       setError(e.message || "Unable to load administration data.");
     } finally {

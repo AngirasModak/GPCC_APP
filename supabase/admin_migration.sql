@@ -35,6 +35,32 @@ alter table public.profiles add column if not exists created_at timestamptz not 
 alter table public.profiles add column if not exists updated_at timestamptz not null default now();
 
 -- ================================================================
+-- 1A) Audit log compatibility for existing production databases
+-- ================================================================
+-- Older GPCC databases may already have audit_logs without metadata.
+-- The Administration console can safely read this optional field once added.
+create table if not exists public.audit_logs (
+  id bigint generated always as identity primary key,
+  occurred_at timestamptz not null default now(),
+  actor_id uuid references auth.users(id),
+  action text not null,
+  entity_type text not null,
+  entity_id text,
+  old_data jsonb,
+  new_data jsonb,
+  metadata jsonb
+);
+alter table public.audit_logs add column if not exists occurred_at timestamptz not null default now();
+alter table public.audit_logs add column if not exists actor_id uuid references auth.users(id);
+alter table public.audit_logs add column if not exists action text not null default 'UNKNOWN';
+alter table public.audit_logs add column if not exists entity_type text not null default 'UNKNOWN';
+alter table public.audit_logs add column if not exists entity_id text;
+alter table public.audit_logs add column if not exists old_data jsonb;
+alter table public.audit_logs add column if not exists new_data jsonb;
+alter table public.audit_logs add column if not exists metadata jsonb;
+create index if not exists idx_audit_actor_time on public.audit_logs(actor_id, occurred_at desc);
+
+-- ================================================================
 -- 2) CRITICAL DEPENDENCY: role_permissions must exist BEFORE
 --    current_role()/has_permission() are created.
 -- ================================================================
@@ -227,6 +253,14 @@ create policy permissions_admin_read
 on public.role_permissions for select
 to authenticated
 using (public.has_permission('users','manage'));
+
+-- Audit logs: administrators can read, nobody can edit/delete from the browser.
+alter table public.audit_logs enable row level security;
+drop policy if exists audit_admin_read on public.audit_logs;
+create policy audit_admin_read
+on public.audit_logs for select
+to authenticated
+using (public.has_permission('audit','view'));
 
 -- ================================================================
 -- 8) Indexes used by Administration
