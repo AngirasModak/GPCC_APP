@@ -1013,7 +1013,7 @@ for all to authenticated
 using (public.has_permission('users','manage'))
 with check (public.has_permission('users','manage'));
 
-drop function if exists public.admin_upsert_residential_unit(uuid,text,text,boolean,text,boolean);
+drop function if exists public.admin_upsert_residential_unit(uuid,text,text,text,boolean,text,boolean);
 
 create or replace function public.admin_upsert_residential_unit(
   p_id uuid,
