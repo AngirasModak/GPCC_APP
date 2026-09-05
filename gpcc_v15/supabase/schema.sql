@@ -1,13 +1,10 @@
--- GPCC ADMINISTRATION / PRODUCTION REPAIR MIGRATION
--- IMPORTANT: Run this file against the EXISTING production database.
--- Do NOT run schema.sql against an existing populated database.
--- This migration is intentionally dependency-ordered and safe to re-run.
+-- GPCC SECURE FINANCE SCHEMA
+-- Run this in Supabase SQL Editor on a fresh database.
+-- The database is the final security boundary: UI visibility, routes and RLS
+-- all enforce the same privilege model.
 
-begin;
+create extension if not exists pgcrypto;
 
--- ================================================================
--- 0) Required enum types (create only if the existing DB lacks them)
--- ================================================================
 do $$ begin
   create type public.gpcc_role as enum ('Administrator','Editor','Member');
 exception when duplicate_object then null; end $$;
@@ -16,9 +13,6 @@ do $$ begin
   create type public.account_status as enum ('Pending','Approved','Rejected','Inactive');
 exception when duplicate_object then null; end $$;
 
--- ================================================================
--- 1) Profiles: ensure the governance columns exist
--- ================================================================
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null default '',
@@ -29,16 +23,97 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
-alter table public.profiles add column if not exists email text;
-alter table public.profiles add column if not exists full_name text not null default '';
-alter table public.profiles add column if not exists created_at timestamptz not null default now();
-alter table public.profiles add column if not exists updated_at timestamptz not null default now();
+create table if not exists public.bank_accounts (
+  id uuid primary key default gen_random_uuid(),
+  account_name text not null,
+  opening_balance numeric(14,2) not null default 0 check (opening_balance >= 0),
+  opening_balance_date date not null,
+  is_active boolean not null default true,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
--- ================================================================
--- 1A) Audit log compatibility for existing production databases
--- ================================================================
--- Older GPCC databases may already have audit_logs without metadata.
--- The Administration console can safely read this optional field once added.
+create table if not exists public.petty_cash_accounts (
+  id uuid primary key default gen_random_uuid(),
+  account_name text not null,
+  opening_balance numeric(14,2) not null default 0 check (opening_balance >= 0),
+  opening_balance_date date not null,
+  is_active boolean not null default true,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.income (
+  id uuid primary key default gen_random_uuid(),
+  date date not null,
+  contributor text not null,
+  flat_no text,
+  amount numeric(14,2) not null check (amount > 0),
+  mode text not null check (mode in ('Cash','Cheque','Online','Bank Transfer','UPI')),
+  reference text,
+  status text not null default 'Cleared',
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  date date not null,
+  requisition_no text not null,
+  vendor text not null,
+  bill_no text,
+  bill_date date,
+  payment_mode text,
+  cheque_or_utr text,
+  payment_date date,
+  gross_amount numeric(14,2) not null check (gross_amount > 0),
+  tds_rate numeric(5,2) not null default 0 check (tds_rate >= 0 and tds_rate <= 100),
+  tds_amount numeric(14,2) not null default 0 check (tds_amount >= 0),
+  net_amount numeric(14,2) not null default 0 check (net_amount >= 0),
+  category text,
+  remarks text,
+  source text,
+  mode text,
+  payment_date_legacy date,
+  payment_reference text,
+  document_url text,
+  status text not null default 'Paid',
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+create table if not exists public.fund_transfers (
+  id uuid primary key default gen_random_uuid(),
+  date date not null,
+  requisition_no text,
+  type text not null,
+  particulars text not null,
+  amount numeric(14,2) not null check (amount > 0),
+  reference text,
+  remarks text,
+  direction text not null check (direction in ('IN','OUT')),
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+create table if not exists public.tds_payments (
+  id uuid primary key default gen_random_uuid(),
+  date date not null,
+  amount numeric(14,2) not null check (amount > 0),
+  challan_no text,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.audit_logs (
   id bigint generated always as identity primary key,
   occurred_at timestamptz not null default now(),
@@ -50,20 +125,7 @@ create table if not exists public.audit_logs (
   new_data jsonb,
   metadata jsonb
 );
-alter table public.audit_logs add column if not exists occurred_at timestamptz not null default now();
-alter table public.audit_logs add column if not exists actor_id uuid references auth.users(id);
-alter table public.audit_logs add column if not exists action text not null default 'UNKNOWN';
-alter table public.audit_logs add column if not exists entity_type text not null default 'UNKNOWN';
-alter table public.audit_logs add column if not exists entity_id text;
-alter table public.audit_logs add column if not exists old_data jsonb;
-alter table public.audit_logs add column if not exists new_data jsonb;
-alter table public.audit_logs add column if not exists metadata jsonb;
-create index if not exists idx_audit_actor_time on public.audit_logs(actor_id, occurred_at desc);
 
--- ================================================================
--- 2) CRITICAL DEPENDENCY: role_permissions must exist BEFORE
---    current_role()/has_permission() are created.
--- ================================================================
 create table if not exists public.role_permissions (
   role public.gpcc_role not null,
   module text not null,
@@ -71,14 +133,14 @@ create table if not exists public.role_permissions (
   primary key (role, module, action)
 );
 
+-- Privilege matrix. Keep this table authoritative for future expansion.
 insert into public.role_permissions(role,module,action) values
  ('Administrator','dashboard','view'),
  ('Administrator','income','view'),('Administrator','income','create'),('Administrator','income','update'),('Administrator','income','delete'),
  ('Administrator','expenses','view'),('Administrator','expenses','create'),('Administrator','expenses','update'),('Administrator','expenses','delete'),
  ('Administrator','petty_cash','view'),('Administrator','petty_cash','create'),('Administrator','petty_cash','update'),('Administrator','petty_cash','delete'),
  ('Administrator','bank_transfers','view'),('Administrator','bank_transfers','create'),('Administrator','bank_transfers','update'),('Administrator','bank_transfers','delete'),
- ('Administrator','reports','view'),('Administrator','excel','view'),('Administrator','excel','import'),
- ('Administrator','admin','view'),('Administrator','users','manage'),('Administrator','bank_setup','manage'),('Administrator','petty_cash_setup','manage'),('Administrator','audit','view'),
+ ('Administrator','reports','view'),('Administrator','excel','view'),('Administrator','excel','import'),('Administrator','admin','view'),('Administrator','users','manage'),('Administrator','bank_setup','manage'),('Administrator','petty_cash_setup','manage'),('Administrator','audit','view'),
  ('Editor','dashboard','view'),
  ('Editor','income','view'),('Editor','income','create'),('Editor','income','update'),('Editor','income','delete'),
  ('Editor','expenses','view'),('Editor','expenses','create'),('Editor','expenses','update'),('Editor','expenses','delete'),
@@ -88,25 +150,13 @@ insert into public.role_permissions(role,module,action) values
  ('Member','dashboard','view'),('Member','reports','view')
 on conflict do nothing;
 
--- ================================================================
--- 3) Existing accounts: backfill email from auth.users
--- ================================================================
-update public.profiles p
-set email = u.email
-from auth.users u
-where p.id = u.id
-  and coalesce(p.email, '') = '';
-
--- Canonical permission catalog. Server-side RPCs validate every requested
--- permission against this catalog; the browser cannot invent a new privilege.
 create table if not exists public.permission_catalog (
   module text not null,
   action text not null,
   primary key (module, action)
 );
 insert into public.permission_catalog(module,action) values
- ('dashboard','view'),
- ('income','view'),('income','create'),('income','update'),('income','delete'),
+ ('dashboard','view'),('income','view'),('income','create'),('income','update'),('income','delete'),
  ('expenses','view'),('expenses','create'),('expenses','update'),('expenses','delete'),
  ('petty_cash','view'),('petty_cash','create'),('petty_cash','update'),('petty_cash','delete'),
  ('bank_transfers','view'),('bank_transfers','create'),('bank_transfers','update'),('bank_transfers','delete'),
@@ -121,34 +171,25 @@ on public.permission_catalog for select
 to authenticated
 using (exists (select 1 from public.profiles p where p.id=auth.uid() and p.role='Administrator' and p.status='Approved'));
 
--- ================================================================
--- 4) Permission helpers. These are SECURITY DEFINER so RLS on
---    role_permissions does not recursively block permission checks.
--- ================================================================
+create index if not exists idx_profiles_status on public.profiles(status);
+create index if not exists idx_income_created_by on public.income(created_by);
+create index if not exists idx_expenses_created_by on public.expenses(created_by);
+create index if not exists idx_transfers_created_by on public.fund_transfers(created_by);
+create index if not exists idx_audit_actor_time on public.audit_logs(actor_id, occurred_at desc);
+
 create or replace function public.current_role()
 returns public.gpcc_role
-language sql
-stable
-security definer
-set search_path = public
+language sql stable security definer set search_path=public
 as $$
-  select role
-  from public.profiles
-  where id = auth.uid()
-    and status = 'Approved'
-  limit 1
+  select role from public.profiles where id=auth.uid() and status='Approved' limit 1
 $$;
 
 create or replace function public.has_permission(p_module text, p_action text)
 returns boolean
-language sql
-stable
-security definer
-set search_path = public
+language sql stable security definer set search_path=public
 as $$
   select exists (
-    select 1
-    from public.role_permissions rp
+    select 1 from public.role_permissions rp
     where rp.role = public.current_role()
       and rp.module = p_module
       and rp.action = p_action
@@ -160,42 +201,7 @@ revoke all on function public.has_permission(text,text) from public;
 grant execute on function public.current_role() to authenticated;
 grant execute on function public.has_permission(text,text) to authenticated;
 
--- ================================================================
--- 5) New-user synchronization
--- ================================================================
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  insert into public.profiles(id, full_name, email, role, status)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data->>'full_name', ''),
-    new.email,
-    'Member',
-    'Pending'
-  )
-  on conflict (id) do update
-  set email = coalesce(excluded.email, public.profiles.email),
-      full_name = case
-        when coalesce(public.profiles.full_name, '') = '' then excluded.full_name
-        else public.profiles.full_name
-      end;
-  return new;
-end;
-$$;
 
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure public.handle_new_user();
-
--- ================================================================
--- 6) Administrator-only profile governance RPC
--- ================================================================
 create or replace function public.admin_update_profile(
   p_user_id uuid,
   p_full_name text,
@@ -205,7 +211,7 @@ create or replace function public.admin_update_profile(
 returns public.profiles
 language plpgsql
 security definer
-set search_path = public
+set search_path=public
 as $$
 declare
   actor_role public.gpcc_role;
@@ -216,7 +222,7 @@ begin
   from public.profiles
   where id = auth.uid() and status = 'Approved';
 
-  if actor_role is distinct from 'Administrator' then
+  if actor_role <> 'Administrator' then
     raise exception 'Administrator privileges are required';
   end if;
 
@@ -224,11 +230,7 @@ begin
     raise exception 'For security, an administrator cannot change their own role or status';
   end if;
 
-  select * into target
-  from public.profiles
-  where id = p_user_id
-  for update;
-
+  select * into target from public.profiles where id = p_user_id for update;
   if not found then
     raise exception 'User profile not found';
   end if;
@@ -239,14 +241,13 @@ begin
     select count(*) into admin_count
     from public.profiles
     where role = 'Administrator' and status = 'Approved';
-
     if admin_count <= 1 then
       raise exception 'The last approved Administrator cannot be removed';
     end if;
   end if;
 
   update public.profiles
-  set full_name = coalesce(nullif(trim(p_full_name), ''), full_name),
+  set full_name = coalesce(trim(p_full_name), full_name),
       role = p_role,
       status = p_status,
       updated_at = now()
@@ -260,6 +261,75 @@ $$;
 revoke all on function public.admin_update_profile(uuid,text,public.gpcc_role,public.account_status) from public;
 grant execute on function public.admin_update_profile(uuid,text,public.gpcc_role,public.account_status) to authenticated;
 
+-- Always stamp the authenticated actor. Clients cannot choose another user's id.
+create or replace function public.stamp_financial_actor()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+  if TG_OP = 'INSERT' then
+    new.created_by := auth.uid();
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+-- Audit every privileged financial change. SECURITY DEFINER prevents users from
+-- inserting or altering audit records themselves.
+create or replace function public.write_audit_log()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+  insert into public.audit_logs(actor_id, action, entity_type, entity_id, old_data, new_data)
+  values (
+    auth.uid(),
+    TG_OP,
+    TG_TABLE_NAME,
+    coalesce((case when TG_OP='DELETE' then old.id else new.id end)::text, null),
+    case when TG_OP in ('UPDATE','DELETE') then to_jsonb(old) else null end,
+    case when TG_OP in ('INSERT','UPDATE') then to_jsonb(new) else null end
+  );
+  return case when TG_OP='DELETE' then old else new end;
+end;
+$$;
+
+-- User creation: account is locked until an Administrator approves it.
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+  insert into public.profiles(id,full_name,email,role,status)
+  values(new.id,coalesce(new.raw_user_meta_data->>'full_name',''),new.email,'Member','Pending')
+  on conflict (id) do update
+    set email = coalesce(excluded.email, public.profiles.email),
+        full_name = case when public.profiles.full_name = '' then excluded.full_name else public.profiles.full_name end;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
+
+-- Updated-at + actor triggers.
+drop trigger if exists trg_income_actor on public.income;
+create trigger trg_income_actor before insert or update on public.income for each row execute procedure public.stamp_financial_actor();
+drop trigger if exists trg_expenses_actor on public.expenses;
+create trigger trg_expenses_actor before insert or update on public.expenses for each row execute procedure public.stamp_financial_actor();
+drop trigger if exists trg_transfers_actor on public.fund_transfers;
+create trigger trg_transfers_actor before insert or update on public.fund_transfers for each row execute procedure public.stamp_financial_actor();
+drop trigger if exists trg_tds_actor on public.tds_payments;
+create trigger trg_tds_actor before insert or update on public.tds_payments for each row execute procedure public.stamp_financial_actor();
+drop trigger if exists trg_bank_actor on public.bank_accounts;
+create trigger trg_bank_actor before insert or update on public.bank_accounts for each row execute procedure public.stamp_financial_actor();
+drop trigger if exists trg_cash_actor on public.petty_cash_accounts;
+create trigger trg_cash_actor before insert or update on public.petty_cash_accounts for each row execute procedure public.stamp_financial_actor();
+
+-- Audit triggers.
+do $$ declare t text; begin
+  foreach t in array array['profiles','bank_accounts','petty_cash_accounts','income','expenses','fund_transfers','tds_payments'] loop
+    execute format('drop trigger if exists audit_%I on public.%I', t, t);
+    execute format('create trigger audit_%I after insert or update or delete on public.%I for each row execute procedure public.write_audit_log()', t, t);
+  end loop;
+end $$;
+
+-- RLS is mandatory. A browser client can never bypass these rules.
 -- ================================================================
 -- 6A) Administrator permission-management RPCs
 -- ================================================================
@@ -382,51 +452,92 @@ grant execute on function public.admin_set_permission(public.gpcc_role,text,text
 revoke all on function public.admin_remove_permission(public.gpcc_role,text,text) from public;
 grant execute on function public.admin_remove_permission(public.gpcc_role,text,text) to authenticated;
 
--- ================================================================
--- 7) Profile RLS: self-read OR administrator-read
--- ================================================================
 alter table public.profiles enable row level security;
-drop policy if exists profiles_select_self_or_admin on public.profiles;
-create policy profiles_select_self_or_admin
-on public.profiles for select
-to authenticated
-using (id = auth.uid() or public.has_permission('users','manage'));
-
--- Permission definitions are administrator-readable only.
 alter table public.role_permissions enable row level security;
-drop policy if exists permissions_admin_read on public.role_permissions;
-create policy permissions_admin_read
-on public.role_permissions for select
-to authenticated
-using (exists (select 1 from public.profiles p where p.id=auth.uid() and p.role='Administrator' and p.status='Approved'));
-
--- Audit logs: administrators can read, nobody can edit/delete from the browser.
+alter table public.bank_accounts enable row level security;
+alter table public.petty_cash_accounts enable row level security;
+alter table public.income enable row level security;
+alter table public.expenses enable row level security;
+alter table public.fund_transfers enable row level security;
+alter table public.tds_payments enable row level security;
 alter table public.audit_logs enable row level security;
-drop policy if exists audit_admin_read on public.audit_logs;
-create policy audit_admin_read
-on public.audit_logs for select
-to authenticated
-using (public.has_permission('audit','view'));
 
--- ================================================================
--- 8) Indexes used by Administration
--- ================================================================
-create index if not exists idx_profiles_status on public.profiles(status);
-create index if not exists idx_profiles_role on public.profiles(role);
-create index if not exists idx_profiles_email on public.profiles(email);
+-- Remove old policies so this script can be reapplied safely.
+do $$ declare r record; begin
+  for r in select schemaname, tablename, policyname from pg_policies where schemaname='public' and tablename in ('profiles','role_permissions','bank_accounts','petty_cash_accounts','income','expenses','fund_transfers','tds_payments','audit_logs') loop
+    execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
+  end loop;
+end $$;
 
-commit;
+-- Profiles: users can see themselves; only administrators can manage accounts.
+create policy profiles_select_self_or_admin on public.profiles for select
+  using (id=auth.uid() or public.has_permission('users','manage'));
 
--- ================================================================
--- OPTIONAL VERIFICATION (run separately after the migration)
--- ================================================================
--- select id, full_name, email, role, status, created_at
--- from public.profiles
--- order by created_at desc;
---
--- select * from public.role_permissions order by role, module, action;
---
--- select to_regprocedure('public.has_permission(text,text)');
+
+-- Permission definitions are not editable from the browser.
+create policy permissions_admin_read on public.role_permissions for select
+  using (public.has_permission('users','manage'));
+
+-- Master account setup is administrator-only.
+create policy bank_select on public.bank_accounts for select
+  using (public.has_permission('dashboard','view'));
+create policy bank_admin_insert on public.bank_accounts for insert
+  with check (public.has_permission('bank_setup','manage'));
+create policy bank_admin_update on public.bank_accounts for update
+  using (public.has_permission('bank_setup','manage'))
+  with check (public.has_permission('bank_setup','manage'));
+create policy bank_admin_delete on public.bank_accounts for delete
+  using (public.has_permission('bank_setup','manage'));
+
+create policy cash_select on public.petty_cash_accounts for select
+  using (public.has_permission('dashboard','view'));
+create policy cash_admin_insert on public.petty_cash_accounts for insert
+  with check (public.has_permission('petty_cash_setup','manage'));
+create policy cash_admin_update on public.petty_cash_accounts for update
+  using (public.has_permission('petty_cash_setup','manage'))
+  with check (public.has_permission('petty_cash_setup','manage'));
+create policy cash_admin_delete on public.petty_cash_accounts for delete
+  using (public.has_permission('petty_cash_setup','manage'));
+
+-- Financial data: members can read permitted reporting data; editors/admins can mutate.
+create policy income_select on public.income for select
+  using (public.has_permission('income','view') and deleted_at is null);
+create policy income_insert on public.income for insert
+  with check (public.has_permission('income','create') and deleted_at is null and created_by=auth.uid());
+create policy income_update on public.income for update
+  using (public.has_permission('income','update'))
+  with check (public.has_permission('income','update'));
+
+create policy expenses_select on public.expenses for select
+  using (public.has_permission('expenses','view') and deleted_at is null);
+create policy expenses_insert on public.expenses for insert
+  with check (public.has_permission('expenses','create') and deleted_at is null and created_by=auth.uid());
+create policy expenses_update on public.expenses for update
+  using (public.has_permission('expenses','update'))
+  with check (public.has_permission('expenses','update'));
+
+create policy transfers_select on public.fund_transfers for select
+  using (public.has_permission('bank_transfers','view') or public.has_permission('petty_cash','view'));
+create policy transfers_insert on public.fund_transfers for insert
+  with check ((public.has_permission('bank_transfers','create') or public.has_permission('petty_cash','create')) and deleted_at is null and created_by=auth.uid());
+create policy transfers_update on public.fund_transfers for update
+  using (public.has_permission('bank_transfers','update') or public.has_permission('petty_cash','update'))
+  with check (public.has_permission('bank_transfers','update') or public.has_permission('petty_cash','update'));
+
+create policy tds_select on public.tds_payments for select
+  using (public.has_permission('expenses','view'));
+create policy tds_insert on public.tds_payments for insert
+  with check (public.has_permission('expenses','create') and created_by=auth.uid());
+create policy tds_update on public.tds_payments for update
+  using (public.has_permission('expenses','update'))
+  with check (public.has_permission('expenses','update'));
+
+-- Audit logs are administrator-read only and cannot be changed by normal users.
+create policy audit_admin_read on public.audit_logs for select
+  using (public.has_permission('audit','view'));
+
+-- No INSERT/UPDATE/DELETE policies are intentionally created for audit_logs or
+-- role_permissions. Only SECURITY DEFINER server triggers can write audit rows.
 
 -- ================================================================
 -- GPCC V13: CUSTOM RBAC + BULK PERMISSION GOVERNANCE
@@ -470,6 +581,23 @@ create policy custom_role_permissions_admin_read
 on public.custom_role_permissions for select
 to authenticated
 using (exists (select 1 from public.profiles p where p.id=auth.uid() and p.role='Administrator' and p.status='Approved'));
+
+-- Canonical permission catalog. Server-side RPCs validate every requested
+-- permission against this catalog; the browser cannot invent a new privilege.
+create table if not exists public.permission_catalog (
+  module text not null,
+  action text not null,
+  primary key (module, action)
+);
+insert into public.permission_catalog(module,action) values
+ ('dashboard','view'),
+ ('income','view'),('income','create'),('income','update'),('income','delete'),
+ ('expenses','view'),('expenses','create'),('expenses','update'),('expenses','delete'),
+ ('petty_cash','view'),('petty_cash','create'),('petty_cash','update'),('petty_cash','delete'),
+ ('bank_transfers','view'),('bank_transfers','create'),('bank_transfers','update'),('bank_transfers','delete'),
+ ('reports','view'),('excel','view'),('excel','import'),('admin','view'),('users','manage'),
+ ('bank_setup','manage'),('petty_cash_setup','manage'),('audit','view')
+on conflict do nothing;
 
 -- Effective permission helper: custom role replaces the base role while
 -- assigned; otherwise the built-in role_permissions are used.
@@ -755,173 +883,25 @@ grant execute on function public.admin_bulk_custom_role_permissions(uuid,text) t
 -- are never allowed to override Administrator accounts.
 commit;
 
--- V13 compatibility hardening: ensure the legacy four-argument profile RPC
--- cannot leave a custom role attached when promoting a user to Administrator.
+-- V13 legacy profile governance hardening
 create or replace function public.admin_update_profile(
-  p_user_id uuid,
-  p_full_name text,
-  p_role public.gpcc_role,
-  p_status public.account_status
-)
-returns public.profiles
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  actor_role public.gpcc_role;
-  target public.profiles;
-  admin_count integer;
-begin
-  select role into actor_role from public.profiles where id = auth.uid() and status = 'Approved';
-  if actor_role is distinct from 'Administrator' then raise exception 'Administrator privileges are required'; end if;
-  if p_user_id = auth.uid() then raise exception 'For security, an administrator cannot change their own role or status'; end if;
-  select * into target from public.profiles where id = p_user_id for update;
-  if not found then raise exception 'User profile not found'; end if;
-  if target.role = 'Administrator' and target.status = 'Approved'
-     and (p_role <> 'Administrator' or p_status <> 'Approved') then
-    select count(*) into admin_count from public.profiles where role='Administrator' and status='Approved';
-    if admin_count <= 1 then raise exception 'The last approved Administrator cannot be removed'; end if;
-  end if;
-  update public.profiles
-  set full_name=coalesce(nullif(trim(p_full_name),''),full_name),
-      role=p_role,
-      status=p_status,
-      custom_role_id=case when p_role='Administrator' then null else custom_role_id end,
-      updated_at=now()
-  where id=p_user_id
-  returning * into target;
-  return target;
-end;
-$$;
-revoke all on function public.admin_update_profile(uuid,text,public.gpcc_role,public.account_status) from public;
-grant execute on function public.admin_update_profile(uuid,text,public.gpcc_role,public.account_status) to authenticated;
-
--- ================================================================
--- GPCC V15: EXCEL CENTRE AUDIT SUPPORT
--- ================================================================
-begin;
-
-create or replace function public.admin_log_event(
-  p_action text,
-  p_entity_type text,
-  p_entity_id text,
-  p_metadata jsonb default '{}'::jsonb
-)
-returns void
-language plpgsql
-security definer
-set search_path=public
-as $$
-declare actor_role public.gpcc_role;
+  p_user_id uuid, p_full_name text, p_role public.gpcc_role, p_status public.account_status
+) returns public.profiles language plpgsql security definer set search_path=public as $$
+declare actor_role public.gpcc_role; target public.profiles; admin_count integer;
 begin
   select role into actor_role from public.profiles where id=auth.uid() and status='Approved';
-  if actor_role is distinct from 'Administrator' then
-    raise exception 'Administrator privileges are required';
+  if actor_role is distinct from 'Administrator' then raise exception 'Administrator privileges are required'; end if;
+  if p_user_id=auth.uid() then raise exception 'For security, an administrator cannot change their own role or status'; end if;
+  select * into target from public.profiles where id=p_user_id for update;
+  if not found then raise exception 'User profile not found'; end if;
+  if target.role='Administrator' and target.status='Approved' and (p_role<>'Administrator' or p_status<>'Approved') then
+    select count(*) into admin_count from public.profiles where role='Administrator' and status='Approved';
+    if admin_count<=1 then raise exception 'The last approved Administrator cannot be removed'; end if;
   end if;
-  insert into public.audit_logs(actor_id,action,entity_type,entity_id,metadata)
-  values(auth.uid(),coalesce(p_action,'EVENT'),coalesce(p_entity_type,'SYSTEM'),p_entity_id,coalesce(p_metadata,'{}'::jsonb));
-end;
-$$;
-revoke all on function public.admin_log_event(text,text,text,jsonb) from public;
-grant execute on function public.admin_log_event(text,text,text,jsonb) to authenticated;
-
-commit;
-
-
--- ================================================================
--- GPCC V15: ATOMIC EXCEL IMPORT RPC
--- The browser validates the workbook; this function is the final
--- authorization/transaction boundary and commits the whole workbook
--- atomically. System-managed IDs/timestamps are generated by Postgres.
--- ================================================================
-begin;
-
-create or replace function public.admin_import_workbook(p_workbook jsonb)
-returns jsonb
-language plpgsql
-security definer
-set search_path=public
-as $$
-declare
-  k text;
-  rows jsonb;
-  n integer;
-  result jsonb := '{}'::jsonb;
-  required_permission text;
-begin
-  if auth.uid() is null then raise exception 'Authentication required'; end if;
-
-  -- Each sheet is checked against the caller's effective permissions.
-  for k in select jsonb_object_keys(coalesce(p_workbook,'{}'::jsonb)) loop
-    if k = 'income' then required_permission := 'income:create';
-    elsif k = 'expenses' then required_permission := 'expenses:create';
-    elsif k = 'fund_transfers' then required_permission := 'bank_transfers:create';
-    elsif k = 'tds_payments' then required_permission := 'expenses:create';
-    elsif k = 'bank_accounts' then required_permission := 'bank_setup:manage';
-    elsif k = 'petty_cash_accounts' then required_permission := 'petty_cash_setup:manage';
-    else raise exception 'Unsupported import sheet: %', k;
-    end if;
-
-    if not public.has_permission(split_part(required_permission,':',1), split_part(required_permission,':',2)) then
-      raise exception 'Insufficient privilege for sheet: %', k;
-    end if;
-
-    rows := p_workbook -> k;
-    if jsonb_typeof(rows) <> 'array' then raise exception 'Sheet % must contain an array', k; end if;
-    if jsonb_array_length(rows) > 5000 then raise exception 'Sheet % exceeds 5000 rows', k; end if;
-  end loop;
-
-  if p_workbook ? 'income' then
-    insert into public.income(date,contributor,flat_no,amount,mode,reference,status,created_by)
-    select date,contributor,flat_no,amount,mode,reference,coalesce(nullif(status,''),'Cleared'),auth.uid()
-    from jsonb_to_recordset(p_workbook->'income') as x(date date, contributor text, flat_no text, amount numeric, mode text, reference text, status text);
-    get diagnostics n = row_count; result := result || jsonb_build_object('income',n);
-  end if;
-
-  if p_workbook ? 'expenses' then
-    insert into public.expenses(date,requisition_no,vendor,bill_no,bill_date,payment_mode,cheque_or_utr,payment_date,gross_amount,tds_rate,tds_amount,net_amount,category,remarks,source,mode,payment_date_legacy,payment_reference,document_url,status,created_by)
-    select date,requisition_no,vendor,bill_no,bill_date,payment_mode,cheque_or_utr,payment_date,gross_amount,coalesce(tds_rate,0),coalesce(tds_amount,0),coalesce(net_amount,gross_amount-coalesce(tds_amount,0)),category,remarks,source,mode,payment_date_legacy,payment_reference,document_url,coalesce(nullif(status,''),'Paid'),auth.uid()
-    from jsonb_to_recordset(p_workbook->'expenses') as x(date date,requisition_no text,vendor text,bill_no text,bill_date date,payment_mode text,cheque_or_utr text,payment_date date,gross_amount numeric,tds_rate numeric,tds_amount numeric,net_amount numeric,category text,remarks text,source text,mode text,payment_date_legacy date,payment_reference text,document_url text,status text);
-    get diagnostics n = row_count; result := result || jsonb_build_object('expenses',n);
-  end if;
-
-  if p_workbook ? 'fund_transfers' then
-    insert into public.fund_transfers(date,requisition_no,type,particulars,amount,reference,remarks,direction,created_by)
-    select date,requisition_no,type,particulars,amount,reference,remarks,direction,auth.uid()
-    from jsonb_to_recordset(p_workbook->'fund_transfers') as x(date date,requisition_no text,type text,particulars text,amount numeric,reference text,remarks text,direction text);
-    get diagnostics n = row_count; result := result || jsonb_build_object('fund_transfers',n);
-  end if;
-
-  if p_workbook ? 'tds_payments' then
-    insert into public.tds_payments(date,amount,challan_no,created_by)
-    select date,amount,challan_no,auth.uid()
-    from jsonb_to_recordset(p_workbook->'tds_payments') as x(date date,amount numeric,challan_no text);
-    get diagnostics n = row_count; result := result || jsonb_build_object('tds_payments',n);
-  end if;
-
-  if p_workbook ? 'bank_accounts' then
-    insert into public.bank_accounts(account_name,opening_balance,opening_balance_date,is_active,created_by)
-    select account_name,coalesce(opening_balance,0),opening_balance_date,coalesce(is_active,true),auth.uid()
-    from jsonb_to_recordset(p_workbook->'bank_accounts') as x(account_name text,opening_balance numeric,opening_balance_date date,is_active boolean);
-    get diagnostics n = row_count; result := result || jsonb_build_object('bank_accounts',n);
-  end if;
-
-  if p_workbook ? 'petty_cash_accounts' then
-    insert into public.petty_cash_accounts(account_name,opening_balance,opening_balance_date,is_active,created_by)
-    select account_name,coalesce(opening_balance,0),opening_balance_date,coalesce(is_active,true),auth.uid()
-    from jsonb_to_recordset(p_workbook->'petty_cash_accounts') as x(account_name text,opening_balance numeric,opening_balance_date date,is_active boolean);
-    get diagnostics n = row_count; result := result || jsonb_build_object('petty_cash_accounts',n);
-  end if;
-
-  insert into public.audit_logs(actor_id,action,entity_type,metadata)
-  values(auth.uid(),'IMPORT','excel_workbook',jsonb_build_object('source','excel_centre','rows',result));
-
-  return result;
-end;
-$$;
-
-revoke all on function public.admin_import_workbook(jsonb) from public;
-grant execute on function public.admin_import_workbook(jsonb) to authenticated;
-
-commit;
+  update public.profiles set full_name=coalesce(nullif(trim(p_full_name),''),full_name), role=p_role, status=p_status,
+    custom_role_id=case when p_role='Administrator' then null else custom_role_id end, updated_at=now()
+    where id=p_user_id returning * into target;
+  return target;
+end; $$;
+revoke all on function public.admin_update_profile(uuid,text,public.gpcc_role,public.account_status) from public;
+grant execute on function public.admin_update_profile(uuid,text,public.gpcc_role,public.account_status) to authenticated;

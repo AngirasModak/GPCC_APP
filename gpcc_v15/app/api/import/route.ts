@@ -98,19 +98,14 @@ export async function POST(req: NextRequest) {
   if (!commit) return NextResponse.json({ preview: true, totalRows: total, errors: allErrors.slice(0, 200), sheets: sheets.map(s => ({ sheet: s.sheet, inputRows: s.inputRows, valid: s.valid, sample: s.rows.slice(0, 5) })) });
   if (allErrors.length) return NextResponse.json({ error: "Import validation failed. No data was written.", errors: allErrors.slice(0, 200) }, { status: 400 });
 
-  const workbookPayload: Record<string, any[]> = {};
+  const inserted: Record<string, number> = {};
+  const failures: string[] = [];
   for (const s of sheets) {
-    workbookPayload[s.sheet] = s.rows.map((row: any) => {
-      const copy = { ...row };
-      // System-managed fields from exported workbooks are never trusted on import.
-      delete copy.id; delete copy.created_at; delete copy.updated_at; delete copy.created_by; delete copy.deleted_at;
-      return copy;
-    });
+    const payload = s.rows.map((row: any) => ({ ...row, created_by: user.id }));
+    const { error } = await supabase.from(s.sheet).insert(payload);
+    if (error) { failures.push(`${s.sheet}: ${error.message}`); break; }
+    inserted[s.sheet] = payload.length;
   }
-
-  const { data: imported, error: importError } = await supabase.rpc("admin_import_workbook", {
-    p_workbook: workbookPayload,
-  });
-  if (importError) return NextResponse.json({ error: importError.message || "Import failed" }, { status: 500 });
-  return NextResponse.json({ success: true, inserted: imported || {} });
+  if (failures.length) return NextResponse.json({ error: "Import stopped. Some earlier sheets may already have been written; review the result before retrying.", inserted, failures }, { status: 500 });
+  return NextResponse.json({ success: true, inserted });
 }
