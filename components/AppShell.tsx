@@ -6,17 +6,17 @@ import { supabase } from "../lib/supabase";
 
 type Role = "Administrator" | "Editor" | "Member";
 type Status = "Pending" | "Approved" | "Rejected" | "Inactive";
-type Profile = { full_name: string; role: Role; status: Status };
+type Profile = { full_name: string; role: Role; status: Status; custom_role_id?: string | null; custom_role_name?: string | null };
 
 const items = [
-  ["/dashboard", "🏠", "Dashboard", ["Administrator", "Editor", "Member"]],
-  ["/income", "💰", "Income & Subscription", ["Administrator", "Editor"]],
-  ["/expenses", "💸", "Expenditure & TDS", ["Administrator", "Editor"]],
-  ["/petty-cash", "💵", "Petty Cash", ["Administrator", "Editor"]],
-  ["/bank-transfers", "🏦", "Bank & Transfers", ["Administrator", "Editor"]],
-  ["/reports", "📊", "Reports & Analytics", ["Administrator", "Editor", "Member"]],
-  ["/excel", "📁", "Excel Centre", ["Administrator", "Editor"]],
-  ["/admin", "👥", "Administration", ["Administrator"]],
+  ["/dashboard", "🏠", "Dashboard", "dashboard", "view"],
+  ["/income", "💰", "Income & Subscription", "income", "view"],
+  ["/expenses", "💸", "Expenditure & TDS", "expenses", "view"],
+  ["/petty-cash", "💵", "Petty Cash", "petty_cash", "view"],
+  ["/bank-transfers", "🏦", "Bank & Transfers", "bank_transfers", "view"],
+  ["/reports", "📊", "Reports & Analytics", "reports", "view"],
+  ["/excel", "📁", "Excel Centre", "excel", "view"],
+  ["/admin", "👥", "Administration", "admin", "view"],
 ] as const;
 
 function Gate({ message, action }: { message?: string; action?: React.ReactNode }) {
@@ -36,6 +36,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [email, setEmail] = useState("");
+  const [permissions, setPermissions] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,20 +51,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (!session) {
         setProfile(null);
         setEmail("");
+        setPermissions([]);
         setReady(true);
         return;
       }
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("full_name,role,status")
+        .select("full_name,role,status,custom_role_id")
         .eq("id", session.user.id)
         .maybeSingle();
 
       if (cancelled) return;
 
       setEmail(session.user.email || "");
-      setProfile(error ? null : (data as Profile | null));
+      if (error || !data) { setProfile(null); setReady(true); return; }
+      const { data: access } = await supabase.rpc("get_my_access");
+      const accessRow = Array.isArray(access) ? access[0] : access;
+      const { data: permissionRows } = await supabase.rpc("get_my_permissions");
+      setProfile({ ...(data as Profile), custom_role_name: accessRow?.custom_role_name || null });
+      setPermissions((permissionRows || []).map((row: { module: string; action: string }) => `${row.module}:${row.action}`));
       setReady(true);
     };
 
@@ -105,9 +112,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return <Gate message="Authentication and administrator approval are required." />;
   }
 
-  const allowed = items.filter((item) =>
-    (item[3] as readonly string[]).includes(profile.role)
-  );
+  const allowed = items.filter((item) => permissions.includes(`${item[3]}:${item[4]}`));
   const canViewRoute = allowed.some(([href]) => href === pathname);
 
   // Never redirect an unauthorized route to itself. Showing a neutral access
@@ -152,7 +157,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="muted">Centralized Finance & Governance</div>
           </div>
           <div className="account-area">
-            <span className="role-badge">{profile.role}</span>
+            <span className="role-badge">{profile.custom_role_name || profile.role}</span>
             <span className="account-user">{profile.full_name || email}</span>
             <button className="btn secondary" onClick={logout}>
               Logout

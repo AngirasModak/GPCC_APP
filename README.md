@@ -18,3 +18,10 @@ If your existing Supabase database reports `function public.has_permission(unkno
 ## Production database migration
 
 For an existing GPCC/Supabase production database, use `supabase/admin_migration.sql` only. Do not use `supabase/schema.sql` as an upgrade script. See `supabase/PRODUCTION_REPAIR.md` for the exact sequence.
+
+## Privilege Matrix Administration (V12)
+The Administration > Privilege Matrix is editable by approved Administrators. Tick a permission to grant it or untick it to revoke it. Changes are performed through `admin_set_permission` / `admin_remove_permission` SECURITY DEFINER RPCs and recorded in `audit_logs`. Critical Administrator controls (`admin:view`, `users:manage`, `audit:view`) cannot be removed from the Administrator role from the browser.
+
+
+## V13 Administration & RBAC
+V13 adds custom roles, bulk permission controls, permission copy/reset operations, affected-user preview, and database-mediated custom-role assignment. See `V13_RBAC_GUIDE.md`.

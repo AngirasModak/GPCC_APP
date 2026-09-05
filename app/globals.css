@@ -16,3 +16,30 @@
   background: #fff8dc;
   color: #765900;
 }
+
+
+/* Editable privilege matrix */
+.permission-action-list { display:flex; gap:6px; flex-wrap:wrap; margin-top:5px; }
+.permission-action-list span { font-size:11px; color:#64748b; text-transform:lowercase; }
+.permission-check-list { display:flex; flex-direction:column; gap:7px; min-width:150px; }
+.permission-toggle { display:flex; align-items:center; gap:7px; font-size:12px; cursor:pointer; }
+.permission-toggle input { width:16px; height:16px; accent-color:#0f766e; }
+.permission-toggle.locked { opacity:.58; cursor:not-allowed; }
+.permission-toggle small { margin-left:auto; font-size:9px; text-transform:uppercase; letter-spacing:.06em; }
+.admin-permission-table th, .admin-permission-table td { vertical-align:top; }
+
+/* V13 RBAC governance controls */
+.admin-role-select{border:1px solid transparent;text-align:left;cursor:pointer;transition:.15s ease;min-height:120px}
+.admin-role-select:hover{transform:translateY(-1px);box-shadow:0 8px 25px #15223812}
+.admin-role-select.selected{border-color:#0f766e;box-shadow:0 0 0 2px #0f766e18}
+.role-custom{background:#f4eefb;color:#67469a}
+.custom-role-sub{display:block;color:#778496;font-size:10px;margin-top:4px}
+.admin-permission-toolbar{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap}
+.admin-permission-toolbar p{margin:5px 0 0;font-size:12px}
+.admin-effective-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.admin-effective-grid .card{display:flex;flex-direction:column;gap:5px}
+.admin-effective-grid span{font-size:11px;color:#687688;text-transform:uppercase;font-weight:800;letter-spacing:.4px}
+.admin-effective-grid strong{font-size:26px}
+.admin-effective-grid small{color:#778496}
+.impact-chip{display:inline-flex;padding:5px 8px;border-radius:999px;background:#eef5f3;color:#23675f;font-size:11px;font-weight:800}
+@media(max-width:900px){.admin-effective-grid{grid-template-columns:1fr}}

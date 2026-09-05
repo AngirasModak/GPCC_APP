@@ -12,8 +12,24 @@ type Profile = {
   email?: string | null;
   role: Role;
   status: Status;
+  custom_role_id?: string | null;
+  custom_role_name?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type CustomRole = {
+  id: string;
+  name: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+};
+
+type CustomPermission = {
+  custom_role_id: string;
+  module: string;
+  action: string;
 };
 
 type BankAccount = {
@@ -47,20 +63,21 @@ type AuditLog = {
 
 const roles: Role[] = ["Administrator", "Editor", "Member"];
 const statuses: Status[] = ["Pending", "Approved", "Rejected", "Inactive"];
-const modules = [
-  "dashboard",
-  "income",
-  "expenses",
-  "petty_cash",
-  "bank_transfers",
-  "reports",
-  "excel",
-  "admin",
-  "users",
-  "bank_setup",
-  "petty_cash_setup",
-  "audit",
-];
+const moduleActions: Record<string, string[]> = {
+  dashboard: ["view"],
+  income: ["view", "create", "update", "delete"],
+  expenses: ["view", "create", "update", "delete"],
+  petty_cash: ["view", "create", "update", "delete"],
+  bank_transfers: ["view", "create", "update", "delete"],
+  reports: ["view"],
+  excel: ["view", "import"],
+  admin: ["view"],
+  users: ["manage"],
+  bank_setup: ["manage"],
+  petty_cash_setup: ["manage"],
+  audit: ["view"],
+};
+const modules = Object.keys(moduleActions);
 
 const labelize = (value: string) =>
   value
@@ -91,6 +108,11 @@ export default function AdministrationPage() {
   const [tab, setTab] = useState("overview");
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
+  const [customPermissions, setCustomPermissions] = useState<CustomPermission[]>([]);
+  const [permissionTarget, setPermissionTarget] = useState<{ kind: "standard"; role: Role } | { kind: "custom"; id: string }>({ kind: "standard", role: "Administrator" });
+  const [customRoleForm, setCustomRoleForm] = useState({ name: "", description: "", copyFrom: "Member" as Role });
+  const [showCustomRoleForm, setShowCustomRoleForm] = useState(false);
   const [banks, setBanks] = useState<BankAccount[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -127,24 +149,34 @@ export default function AdministrationPage() {
       // record and show a migration notice instead of blanking the whole page.
       let profilesResult = await supabase
         .from("profiles")
-        .select("id,full_name,email,role,status,created_at,updated_at")
+        .select("id,full_name,email,role,status,custom_role_id,created_at,updated_at")
         .order("created_at", { ascending: false });
 
       if (profilesResult.error?.message?.toLowerCase().includes("profiles.email")) {
         setSchemaWarning("The deployed Supabase database is missing the profiles.email column. Run supabase/admin_migration.sql once, then refresh this page.");
         profilesResult = await supabase
           .from("profiles")
-          .select("id,full_name,role,status,created_at,updated_at")
+          .select("id,full_name,role,status,custom_role_id,created_at,updated_at")
           .order("created_at", { ascending: false }) as typeof profilesResult;
       } else {
         setSchemaWarning("");
       }
 
-      const [permissionsResult, banksResult, cashResult, auditResult] = await Promise.all([
+      const [permissionsResult, customRolesResult, customPermissionsResult, banksResult, cashResult, auditResult] = await Promise.all([
         supabase
           .from("role_permissions")
           .select("role,module,action")
           .order("role")
+          .order("module")
+          .order("action"),
+        supabase
+          .from("custom_roles")
+          .select("id,name,description,is_active,created_at")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("custom_role_permissions")
+          .select("custom_role_id,module,action")
+          .order("custom_role_id")
           .order("module")
           .order("action"),
         supabase
@@ -181,6 +213,8 @@ export default function AdministrationPage() {
       const firstError =
         profilesResult.error ||
         permissionsResult.error ||
+        customRolesResult.error ||
+        customPermissionsResult.error ||
         banksResult.error ||
         cashResult.error ||
         resolvedAuditResult.error;
@@ -188,6 +222,11 @@ export default function AdministrationPage() {
 
       setProfiles((profilesResult.data || []) as Profile[]);
       setPermissions((permissionsResult.data || []) as Permission[]);
+      const loadedCustomRoles = (customRolesResult.data || []) as CustomRole[];
+      const roleNames = new Map(loadedCustomRoles.map((r) => [r.id, r.name]));
+      setCustomPermissions((customPermissionsResult.data || []) as CustomPermission[]);
+      setCustomRoles(loadedCustomRoles);
+      setProfiles(((profilesResult.data || []) as Profile[]).map((p) => ({ ...p, custom_role_name: p.custom_role_id ? roleNames.get(p.custom_role_id) || null : null })));
       setBanks((banksResult.data || []) as BankAccount[]);
       setCashAccounts((cashResult.data || []) as CashAccount[]);
       setAuditLogs((resolvedAuditResult.data || []) as AuditLog[]);
@@ -216,7 +255,7 @@ export default function AdministrationPage() {
     const query = userSearch.trim().toLowerCase();
     return profiles.filter((p) => {
       const matchesSearch = !query ||
-        [p.full_name, p.email, p.id].some((v) => String(v || "").toLowerCase().includes(query));
+        [p.full_name, p.email, p.id, p.custom_role_name].some((v) => String(v || "").toLowerCase().includes(query));
       const matchesStatus = userFilter === "All" || p.status === userFilter;
       const matchesRole = roleFilter === "All" || p.role === roleFilter;
       return matchesSearch && matchesStatus && matchesRole;
@@ -240,7 +279,136 @@ export default function AdministrationPage() {
     }));
   }, [permissions]);
 
-  const updateUser = async (user: Profile, patch: { role?: Role; status?: Status; full_name?: string }) => {
+  const selectedPermissionCount = permissionTarget.kind === "standard"
+    ? permissions.filter((p) => p.role === permissionTarget.role).length
+    : customPermissions.filter((p) => p.custom_role_id === permissionTarget.id).length;
+  const selectedPermissionModules = permissionTarget.kind === "standard"
+    ? new Set(permissions.filter((p) => p.role === permissionTarget.role).map((p) => p.module)).size
+    : new Set(customPermissions.filter((p) => p.custom_role_id === permissionTarget.id).map((p) => p.module)).size;
+  const selectedAffectedUsers = permissionTarget.kind === "standard"
+    ? profiles.filter((p) => p.role === permissionTarget.role && p.status === "Approved" && !p.custom_role_id).length
+    : profiles.filter((p) => p.custom_role_id === permissionTarget.id && p.status === "Approved").length;
+
+  const setPermission = async (role: Role, module: string, action: string, enabled: boolean) => {
+    if (!enabled && !window.confirm(`Remove ${action} permission from ${role} → ${labelize(module)}?`)) return;
+    setBusy(true);
+    clearFeedback();
+    try {
+      const rpc = enabled ? "admin_set_permission" : "admin_remove_permission";
+      const { error: permissionError } = await supabase.rpc(rpc, {
+        p_role: role,
+        p_module: module,
+        p_action: action,
+      });
+      if (permissionError) throw new Error(permissionError.message);
+      setPermissions((current) => enabled
+        ? current.some((p) => p.role === role && p.module === module && p.action === action)
+          ? current
+          : [...current, { role, module, action }]
+        : current.filter((p) => !(p.role === role && p.module === module && p.action === action))
+      );
+      setMessage(`${enabled ? "Granted" : "Removed"} ${action} permission for ${role} → ${labelize(module)}.`);
+    } catch (e: any) {
+      setError(e.message || "Unable to change permission.");
+      await loadAll();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const permissionEnabled = (role: Role, module: string, action: string) =>
+    permissions.some((p) => p.role === role && p.module === module && p.action === action);
+
+  const customPermissionEnabled = (roleId: string, module: string, action: string) =>
+    customPermissions.some((p) => p.custom_role_id === roleId && p.module === module && p.action === action);
+
+  const bulkPermissionAction = async (kind: "standard" | "custom", target: string, mode: "grant_all" | "remove_all" | "reset" | "copy_member" | "copy_editor" | "copy_admin") => {
+    const destructive = mode === "remove_all" || mode === "reset" || mode.startsWith("copy_");
+    const targetName = kind === "standard" ? target : (customRoles.find((r) => r.id === target)?.name || "custom role");
+    if (destructive && !window.confirm(`${labelize(mode)} for ${targetName}? Existing permissions may be replaced or removed.`)) return;
+    setBusy(true);
+    clearFeedback();
+    try {
+      const rpc = kind === "standard" ? "admin_bulk_role_permissions" : "admin_bulk_custom_role_permissions";
+      const payload = kind === "standard"
+        ? { p_role: target, p_mode: mode }
+        : { p_custom_role_id: target, p_mode: mode };
+      const { error: rpcError } = await supabase.rpc(rpc, payload);
+      if (rpcError) throw new Error(rpcError.message);
+      setMessage(`${mode.replaceAll("_", " ")} completed successfully.`);
+      await loadAll();
+    } catch (e: any) {
+      setError(e.message || "Unable to change permissions.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createCustomRole = async () => {
+    if (!customRoleForm.name.trim()) { setError("Custom role name is required."); return; }
+    setBusy(true); clearFeedback();
+    try {
+      const { data, error: rpcError } = await supabase.rpc("admin_create_custom_role", {
+        p_name: customRoleForm.name.trim(),
+        p_description: customRoleForm.description.trim(),
+        p_copy_from_role: customRoleForm.copyFrom,
+      });
+      if (rpcError) throw new Error(rpcError.message);
+      setMessage(`Custom role “${customRoleForm.name.trim()}” created.`);
+      setCustomRoleForm({ name: "", description: "", copyFrom: "Member" });
+      setShowCustomRoleForm(false);
+      await loadAll();
+      if (data?.id) setPermissionTarget({ kind: "custom", id: data.id });
+    } catch (e: any) { setError(e.message || "Unable to create custom role."); }
+    finally { setBusy(false); }
+  };
+
+  const editCustomRole = async (role: CustomRole) => {
+    const name = window.prompt("Custom role name", role.name);
+    if (name === null) return;
+    const description = window.prompt("Role description", role.description);
+    if (description === null) return;
+    if (!name.trim()) { setError("Role name is required."); return; }
+    setBusy(true); clearFeedback();
+    try {
+      const { error: rpcError } = await supabase.rpc("admin_update_custom_role", { p_custom_role_id: role.id, p_name: name.trim(), p_description: description.trim() });
+      if (rpcError) throw new Error(rpcError.message);
+      setMessage(`Custom role “${name.trim()}” updated.`);
+      await loadAll();
+    } catch (e: any) { setError(e.message || "Unable to update custom role."); }
+    finally { setBusy(false); }
+  };
+
+  const setCustomRoleStatus = async (role: CustomRole) => {
+    const next = !role.is_active;
+    if (!next && !window.confirm(`Deactivate “${role.name}”? Assigned users will temporarily fall back to their base role permissions.`)) return;
+    setBusy(true); clearFeedback();
+    try {
+      const { error: rpcError } = await supabase.rpc("admin_set_custom_role_status", { p_custom_role_id: role.id, p_is_active: next });
+      if (rpcError) throw new Error(rpcError.message);
+      setMessage(`Custom role “${role.name}” is now ${next ? "active" : "inactive"}.`);
+      await loadAll();
+    } catch (e: any) { setError(e.message || "Unable to change custom role status."); }
+    finally { setBusy(false); }
+  };
+
+  const deleteCustomRole = async (role: CustomRole) => {
+    if (!window.confirm(`Delete custom role “${role.name}”? It must not be assigned to any user.`)) return;
+    setBusy(true); clearFeedback();
+    try {
+      const { error: rpcError } = await supabase.rpc("admin_delete_custom_role", { p_custom_role_id: role.id });
+      if (rpcError) throw new Error(rpcError.message);
+      setMessage(`Custom role “${role.name}” deleted.`);
+      setPermissionTarget({ kind: "standard", role: "Administrator" });
+      await loadAll();
+    } catch (e: any) { setError(e.message || "Unable to delete custom role."); }
+    finally { setBusy(false); }
+  };
+
+  const copyStandardToCustom = async (customId: string, sourceRole: Role) =>
+    bulkPermissionAction("custom", customId, sourceRole === "Administrator" ? "copy_admin" : sourceRole === "Editor" ? "copy_editor" : "copy_member");
+
+  const updateUser = async (user: Profile, patch: { role?: Role; status?: Status; full_name?: string; custom_role_id?: string | null }) => {
     setBusy(true);
     clearFeedback();
     try {
@@ -249,6 +417,7 @@ export default function AdministrationPage() {
         p_full_name: patch.full_name ?? user.full_name,
         p_role: patch.role ?? user.role,
         p_status: patch.status ?? user.status,
+        p_custom_role_id: patch.custom_role_id ?? user.custom_role_id ?? null,
       });
       if (updateError) throw new Error(updateError.message);
       setMessage(`${user.full_name || user.email || "User"} updated successfully.`);
@@ -384,7 +553,7 @@ export default function AdministrationPage() {
           <div className="card table-card"><div className="tableWrap"><table className="table admin-table"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
             {filteredProfiles.map((user) => <tr key={user.id}>
               <td><div className="admin-user"><b>{user.full_name || "Unnamed user"}</b><small>{user.email || user.id}</small></div></td>
-              <td><span className={`role-chip role-${user.role.toLowerCase()}`}>{user.role}</span></td>
+              <td><span className={`role-chip role-${user.role.toLowerCase()}`}>{user.custom_role_name || user.role}</span>{user.custom_role_name && <small className="custom-role-sub">Base: {user.role}</small>}</td>
               <td>{renderStatus(user.status)}</td>
               <td>{new Date(user.created_at).toLocaleDateString("en-IN")}</td>
               <td><button className="btn secondary small-btn" onClick={() => setSelectedUser(user)}>Manage</button></td>
@@ -413,10 +582,41 @@ export default function AdministrationPage() {
         </section>
       ) : tab === "permissions" ? (
         <section className="admin-section">
-          <div className="admin-section-head"><div><h2>Privilege Matrix</h2><p className="muted">Authoritative permissions loaded from <code>role_permissions</code>. This matrix is read-only from the browser.</p></div></div>
-          <div className="admin-role-cards">{roleSummary.map((r) => <div className="card" key={r.role}><span className="role-chip">{r.role}</span><strong>{r.permissions}</strong><small>{r.modules} modules enabled</small></div>)}</div>
-          <div className="card table-card"><div className="tableWrap"><table className="table admin-permission-table"><thead><tr><th>Module</th>{roles.map((role) => <th key={role}>{role}</th>)}</tr></thead><tbody>{modules.map((module) => <tr key={module}><td><b>{labelize(module)}</b></td>{roles.map((role) => { const actions = permissions.filter((p) => p.role === role && p.module === module).map((p) => p.action); return <td key={role}>{actions.length ? <div className="permission-pills">{actions.map((a) => <span key={a}>{a}</span>)}</div> : <span className="permission-none">—</span>}</td>; })}</tr>)}</tbody></table></div></div>
-          <div className="admin-note">Security note: changing the visual matrix is intentionally disabled. Permission definitions should be changed through reviewed database migrations, while financial data remains protected by Supabase RLS.</div>
+          <div className="admin-section-head">
+            <div><h2>Privilege & Role Management</h2><p className="muted">Manage standard role permissions, create custom roles, copy access profiles and preview who will be affected.</p></div>
+            <button className="btn" onClick={() => setShowCustomRoleForm((v) => !v)}>{showCustomRoleForm ? "Close" : "+ Create Custom Role"}</button>
+          </div>
+
+          {showCustomRoleForm && <div className="card admin-form-card">
+            <div className="admin-card-title"><div><h3>Create Custom Role</h3><p className="muted">Create a tailored access profile without changing the built-in Administrator, Editor or Member roles.</p></div></div>
+            <div className="admin-edit-grid">
+              <label>Role name<input className="input" placeholder="e.g. Finance Reviewer" value={customRoleForm.name} onChange={(e) => setCustomRoleForm({ ...customRoleForm, name: e.target.value })} /></label>
+              <label>Copy permissions from<select className="input" value={customRoleForm.copyFrom} onChange={(e) => setCustomRoleForm({ ...customRoleForm, copyFrom: e.target.value as Role })}>{roles.map((r) => <option key={r}>{r}</option>)}</select></label>
+              <label>Description<input className="input" placeholder="Purpose of this role" value={customRoleForm.description} onChange={(e) => setCustomRoleForm({ ...customRoleForm, description: e.target.value })} /></label>
+            </div>
+            <div className="actions"><button className="btn" disabled={busy} onClick={createCustomRole}>Create Role</button></div>
+          </div>}
+
+          <div className="admin-role-cards">{roleSummary.map((r) => <button className={`card admin-role-select ${permissionTarget.kind === "standard" && permissionTarget.role === r.role ? "selected" : ""}`} key={r.role} onClick={() => setPermissionTarget({ kind: "standard", role: r.role })}><span className="role-chip">{r.role}</span><strong>{r.permissions}</strong><small>{r.modules} modules enabled · {profiles.filter((p) => p.role === r.role && p.status === "Approved" && !p.custom_role_id).length} users</small></button>)}{customRoles.map((r) => <button className={`card admin-role-select ${permissionTarget.kind === "custom" && permissionTarget.id === r.id ? "selected" : ""}`} key={r.id} onClick={() => setPermissionTarget({ kind: "custom", id: r.id })}><span className="role-chip role-custom">Custom · {r.is_active ? "Active" : "Inactive"}</span><strong>{customPermissions.filter((p) => p.custom_role_id === r.id).length}</strong><small>{r.name} · {profiles.filter((p) => p.custom_role_id === r.id && p.status === "Approved").length} users</small></button>)}</div>
+
+          {permissionTarget.kind === "standard" ? <div className="card admin-permission-toolbar">
+            <div><b>{permissionTarget.role}</b><span className="muted"> Standard role · changes affect all users assigned to this role.</span></div>
+            <div className="actions">
+              <button className="btn secondary small-btn" disabled={busy} onClick={() => bulkPermissionAction("standard", permissionTarget.role, "grant_all")}>Grant All</button>
+              <button className="btn secondary small-btn" disabled={busy} onClick={() => bulkPermissionAction("standard", permissionTarget.role, "reset")}>Reset Default</button>
+              <button className="btn danger small-btn" disabled={busy} onClick={() => bulkPermissionAction("standard", permissionTarget.role, "remove_all")}>Remove All</button>
+            </div>
+          </div> : <div className="card admin-permission-toolbar">
+            {(() => { const cr = customRoles.find((r) => r.id === permissionTarget.id); const affected = profiles.filter((p) => p.custom_role_id === permissionTarget.id && p.status === "Approved").length; return <><div><b>{cr?.name || "Custom role"}</b><span className="muted"> · {affected} approved users affected</span><p className="muted">{cr?.description || "No description"}</p></div><div className="actions"><button className="btn secondary small-btn" disabled={busy} onClick={() => copyStandardToCustom(permissionTarget.id, "Administrator")}>Copy Admin</button><button className="btn secondary small-btn" disabled={busy} onClick={() => copyStandardToCustom(permissionTarget.id, "Editor")}>Copy Editor</button><button className="btn secondary small-btn" disabled={busy} onClick={() => copyStandardToCustom(permissionTarget.id, "Member")}>Copy Member</button><button className="btn secondary small-btn" disabled={busy} onClick={() => bulkPermissionAction("custom", permissionTarget.id, "grant_all")}>Grant All</button><button className="btn secondary small-btn" disabled={busy} onClick={() => bulkPermissionAction("custom", permissionTarget.id, "remove_all")}>Remove All</button>{cr && <><button className="btn secondary small-btn" disabled={busy} onClick={() => editCustomRole(cr)}>Edit Details</button><button className="btn secondary small-btn" disabled={busy} onClick={() => setCustomRoleStatus(cr)}>{cr.is_active ? "Deactivate" : "Activate"}</button><button className="btn danger small-btn" disabled={busy} onClick={() => deleteCustomRole(cr)}>Delete Role</button></>}</div></> })()}
+          </div>}
+
+          <div className="admin-effective-grid">
+            <div className="card"><span>Effective permissions</span><strong>{selectedPermissionCount}</strong><small>{selectedPermissionModules} modules enabled</small></div>
+            <div className="card"><span>Approved users affected</span><strong>{selectedAffectedUsers}</strong><small>Changes apply immediately</small></div>
+            <div className="card"><span>Available controls</span><strong>{Object.values(moduleActions).reduce((n, actions) => n + actions.length, 0)}</strong><small>Across {modules.length} modules</small></div>
+          </div>
+          <div className="card table-card"><div className="tableWrap"><table className="table admin-permission-table"><thead><tr><th>Module / Action</th><th>{permissionTarget.kind === "standard" ? permissionTarget.role : (customRoles.find((r) => r.id === permissionTarget.id)?.name || "Custom Role")}</th><th>Impact</th></tr></thead><tbody>{modules.map((module) => <tr key={module}><td><b>{labelize(module)}</b><div className="permission-action-list">{moduleActions[module].map((action) => <span key={action}>{action}</span>)}</div></td><td><div className="permission-check-list">{moduleActions[module].map((action) => { const enabled = permissionTarget.kind === "standard" ? permissionEnabled(permissionTarget.role, module, action) : customPermissionEnabled(permissionTarget.id, module, action); const locked = permissionTarget.kind === "standard" && permissionTarget.role === "Administrator" && ["admin:view", "users:manage", "audit:view"].includes(`${module}:${action}`); return <label className={`permission-toggle ${locked ? "locked" : ""}`} key={action}><input type="checkbox" checked={enabled} disabled={busy || locked} onChange={(e) => { if (permissionTarget.kind === "standard") setPermission(permissionTarget.role, module, action, e.target.checked); else { setBusy(true); clearFeedback(); supabase.rpc(e.target.checked ? "admin_set_custom_permission" : "admin_remove_custom_permission", { p_custom_role_id: permissionTarget.id, p_module: module, p_action: action }).then(async ({ error: rpcError }) => { if (rpcError) setError(rpcError.message); else setMessage(`${e.target.checked ? "Granted" : "Removed"} ${action} → ${labelize(module)}.`); await loadAll(); }).finally(() => setBusy(false)); } }} /><span>{action}</span>{locked && <small>protected</small>}</label>; })}</div></td><td><span className="impact-chip">{permissionTarget.kind === "standard" ? `${profiles.filter((p) => p.role === permissionTarget.role && p.status === "Approved" && !p.custom_role_id).length} users` : `${profiles.filter((p) => p.custom_role_id === permissionTarget.id && p.status === "Approved").length} users`}</span></td></tr>)}</tbody></table></div></div>
+          <div className="admin-note"><b>Governance:</b> Grant All, Remove All, Reset Default and Copy operations are performed by protected database functions and written to the audit log. Critical Administrator controls remain protected. Custom roles can be assigned to approved non-Administrator users from User & Access.</div>
         </section>
       ) : (
         <section className="admin-section">
@@ -428,14 +628,15 @@ export default function AdministrationPage() {
       {selectedUser && (
         <div className="modalBg" onMouseDown={() => !busy && setSelectedUser(null)}><div className="modal admin-user-modal" onMouseDown={(e) => e.stopPropagation()}>
           <div className="admin-modal-head"><div><div className="eyebrow">ACCOUNT CONTROL</div><h2>{selectedUser.full_name || "User account"}</h2><p className="muted">{selectedUser.email || selectedUser.id}</p></div><button className="icon-btn" onClick={() => setSelectedUser(null)}>×</button></div>
-          <div className="admin-detail-grid"><div><span>Status</span><b>{renderStatus(selectedUser.status)}</b></div><div><span>Current role</span><b>{selectedUser.role}</b></div><div><span>Created</span><b>{new Date(selectedUser.created_at).toLocaleString("en-IN")}</b></div><div><span>User ID</span><b className="mono">{selectedUser.id}</b></div></div>
+          <div className="admin-detail-grid"><div><span>Status</span><b>{renderStatus(selectedUser.status)}</b></div><div><span>Current role</span><b>{selectedUser.custom_role_name || selectedUser.role}</b></div><div><span>Created</span><b>{new Date(selectedUser.created_at).toLocaleString("en-IN")}</b></div><div><span>User ID</span><b className="mono">{selectedUser.id}</b></div></div>
           <div className="admin-edit-grid">
             <label>Full name<input className="input" value={selectedUser.full_name} onChange={(e) => setSelectedUser({ ...selectedUser, full_name: e.target.value })} /></label>
-            <label>Role<select className="input" value={selectedUser.role} onChange={(e) => setSelectedUser({ ...selectedUser, role: e.target.value as Role })}>{roles.map((r) => <option key={r}>{r}</option>)}</select></label>
+            <label>Base role<select className="input" value={selectedUser.role} onChange={(e) => setSelectedUser({ ...selectedUser, role: e.target.value as Role, custom_role_id: e.target.value === "Administrator" ? null : selectedUser.custom_role_id })}>{roles.map((r) => <option key={r}>{r}</option>)}</select></label>
             <label>Status<select className="input" value={selectedUser.status} onChange={(e) => setSelectedUser({ ...selectedUser, status: e.target.value as Status })}>{statuses.map((s) => <option key={s}>{s}</option>)}</select></label>
+            <label>Custom role<select className="input" value={selectedUser.role === "Administrator" ? "" : (selectedUser.custom_role_id || "")} disabled={selectedUser.role === "Administrator"} onChange={(e) => setSelectedUser({ ...selectedUser, custom_role_id: e.target.value || null })}><option value="">Use base role permissions</option>{customRoles.filter((r) => r.is_active).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
           </div>
           <div className="admin-warning">Changing a user's role or approval status immediately changes their access to the protected application.</div>
-          <div className="actions admin-modal-actions"><button className="btn" disabled={busy} onClick={() => updateUser(selectedUser, { full_name: selectedUser.full_name, role: selectedUser.role, status: selectedUser.status })}>Save Access Changes</button>{selectedUser.status === "Pending" && <button className="btn" disabled={busy} onClick={() => setConfirmAction({ type: "approve", user: selectedUser })}>Approve</button>}{selectedUser.status === "Approved" && <button className="btn danger" disabled={busy} onClick={() => setConfirmAction({ type: "inactive", user: selectedUser })}>Deactivate</button>}{selectedUser.status === "Inactive" && <button className="btn" disabled={busy} onClick={() => setConfirmAction({ type: "activate", user: selectedUser })}>Reactivate</button>}{selectedUser.status === "Pending" && <button className="btn secondary" disabled={busy} onClick={() => setConfirmAction({ type: "reject", user: selectedUser })}>Reject</button>}</div>
+          <div className="actions admin-modal-actions"><button className="btn" disabled={busy} onClick={() => updateUser(selectedUser, { full_name: selectedUser.full_name, role: selectedUser.role, status: selectedUser.status, custom_role_id: selectedUser.role === "Administrator" ? null : selectedUser.custom_role_id })}>Save Access Changes</button>{selectedUser.status === "Pending" && <button className="btn" disabled={busy} onClick={() => setConfirmAction({ type: "approve", user: selectedUser })}>Approve</button>}{selectedUser.status === "Approved" && <button className="btn danger" disabled={busy} onClick={() => setConfirmAction({ type: "inactive", user: selectedUser })}>Deactivate</button>}{selectedUser.status === "Inactive" && <button className="btn" disabled={busy} onClick={() => setConfirmAction({ type: "activate", user: selectedUser })}>Reactivate</button>}{selectedUser.status === "Pending" && <button className="btn secondary" disabled={busy} onClick={() => setConfirmAction({ type: "reject", user: selectedUser })}>Reject</button>}</div>
         </div></div>
       )}
 
