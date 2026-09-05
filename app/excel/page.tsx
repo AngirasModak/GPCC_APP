@@ -11,7 +11,6 @@ const SHEETS = [
   { key: "bank_accounts", label: "Bank Accounts", permission: "Bank Setup → Manage" },
   { key: "petty_cash_accounts", label: "Petty Cash Accounts", permission: "Petty Cash Setup → Manage" },
 ];
-
 const templates: Record<string, any[]> = {
   income: [{ date: "2026-09-01", contributor: "Example Resident", flat_no: "A-101", amount: 5000, mode: "UPI", reference: "UPI-001", status: "Cleared" }],
   expenses: [{ date: "2026-09-01", requisition_no: "REQ-001", vendor: "Example Vendor", bill_no: "B-001", gross_amount: 10000, tds_rate: 0, tds_amount: 0, net_amount: 10000, category: "Maintenance", payment_mode: "Bank Transfer", status: "Paid" }],
@@ -20,106 +19,42 @@ const templates: Record<string, any[]> = {
   bank_accounts: [{ account_name: "Main Bank Account", opening_balance: 0, opening_balance_date: "2026-04-01", is_active: true }],
   petty_cash_accounts: [{ account_name: "Main Petty Cash", opening_balance: 0, opening_balance_date: "2026-04-01", is_active: true }],
 };
-
 function downloadWorkbook() {
   const wb = XLSX.utils.book_new();
   Object.entries(templates).forEach(([name, rows]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), name));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["GPCC Excel Centre Template"],["Delete example rows before import. Keep column names unchanged."]]), "Instructions");
   XLSX.writeFile(wb, "GPCC_Excel_Import_Template.xlsx");
 }
+function downloadErrors(errors:string[]) {
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(errors.map((error,i)=>({Row:i+1,Error:error}))),"Errors"); XLSX.writeFile(wb,`GPCC_Import_Errors_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function money(n:number){return new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(n||0)}
 
 export default function ExcelCentrePage() {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [sheets, setSheets] = useState<string[]>(["all"]);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [preview, setPreview] = useState<any>(null);
-  const [result, setResult] = useState<any>(null);
-
-  const selectedLabel = useMemo(() => sheets.includes("all") ? "All permitted data" : `${sheets.length} selected`, [sheets]);
-
-  const toggleSheet = (key: string) => {
-    setSheets(prev => {
-      if (key === "all") return ["all"];
-      const base = prev.filter(x => x !== "all");
-      const next = base.includes(key) ? base.filter(x => x !== key) : [...base, key];
-      return next.length ? next : ["all"];
-    });
-  };
-
-  async function exportData() {
-    setBusy(true); setError(""); setMessage("");
-    try {
-      const params = new URLSearchParams();
-      if (from) params.set("from", from); if (to) params.set("to", to); params.set("sheets", sheets.join(","));
-      const res = await fetch(`/api/export?${params.toString()}`);
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || "Export failed"); }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `GPCC_Financial_Export_${new Date().toISOString().slice(0,10)}.xlsx`; a.click(); URL.revokeObjectURL(url);
-      setMessage("Financial data exported successfully.");
-    } catch (e:any) { setError(e.message || "Unable to export data."); }
-    finally { setBusy(false); }
-  }
-
-  async function previewImport() {
-    if (!file) return setError("Choose an Excel workbook first.");
-    setBusy(true); setError(""); setMessage(""); setResult(null);
-    const form = new FormData(); form.append("file", file); form.append("commit", "false");
-    try { const res = await fetch("/api/import", { method: "POST", body: form }); const j = await res.json(); if (!res.ok) throw new Error(j.errors?.slice(0,3).join(" | ") || j.error || "Preview failed"); setPreview(j); setMessage("Validation preview generated. Nothing has been written."); }
-    catch (e:any) { setError(e.message || "Unable to validate workbook."); }
-    finally { setBusy(false); }
-  }
-
-  async function commitImport() {
-    if (!file || !preview || preview.errors?.length) return;
-    if (!window.confirm("Import the validated workbook into GPCC? This will create financial records and cannot be automatically undone.")) return;
-    setBusy(true); setError(""); setMessage("");
-    const form = new FormData(); form.append("file", file); form.append("commit", "true");
-    try { const res = await fetch("/api/import", { method: "POST", body: form }); const j = await res.json(); if (!res.ok) throw new Error(j.error || j.failures?.join(" | ") || "Import failed"); setResult(j); setPreview(null); setFile(null); if (inputRef.current) inputRef.current.value = ""; setMessage("Import completed successfully."); }
-    catch (e:any) { setError(e.message || "Unable to import workbook."); }
-    finally { setBusy(false); }
-  }
-
+  const inputRef=useRef<HTMLInputElement>(null); const [file,setFile]=useState<File|null>(null); const [from,setFrom]=useState(""); const [to,setTo]=useState("");
+  const [sheets,setSheets]=useState<string[]>(["all"]); const [busy,setBusy]=useState(false); const [message,setMessage]=useState(""); const [error,setError]=useState(""); const [preview,setPreview]=useState<any>(null); const [result,setResult]=useState<any>(null); const [tab,setTab]=useState<"workspace"|"history"|"reconcile">("workspace"); const [history,setHistory]=useState<any[]>([]); const [recon,setRecon]=useState<any>(null);
+  const selectedLabel=useMemo(()=>sheets.includes("all")?"All permitted data":`${sheets.length} selected`,[sheets]);
+  const toggleSheet=(key:string)=>setSheets(prev=>{if(key==="all")return["all"];const base=prev.filter(x=>x!=="all");const next=base.includes(key)?base.filter(x=>x!==key):[...base,key];return next.length?next:["all"]});
+  const clearStatus=()=>{setError("");setMessage("")};
+  async function exportData(){setBusy(true);clearStatus();try{const p=new URLSearchParams();if(from)p.set("from",from);if(to)p.set("to",to);p.set("sheets",sheets.join(","));const res=await fetch(`/api/export?${p}`);if(!res.ok){const j=await res.json().catch(()=>({}));throw new Error(j.error||"Export failed")}const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`GPCC_Financial_Export_${new Date().toISOString().slice(0,10)}.xlsx`;a.click();URL.revokeObjectURL(url);setMessage("Financial data exported successfully.")}catch(e:any){setError(e.message||"Unable to export data.")}finally{setBusy(false)}}
+  async function previewImport(){if(!file)return setError("Choose an Excel workbook first.");setBusy(true);clearStatus();setResult(null);const f=new FormData();f.append("file",file);f.append("commit","false");try{const res=await fetch("/api/import",{method:"POST",body:f});const j=await res.json();if(!res.ok)throw new Error(j.errors?.slice(0,3).join(" | ")||j.error||"Preview failed");setPreview(j);setMessage("Validation preview generated. Nothing has been written.")}catch(e:any){setError(e.message||"Unable to validate workbook.")}finally{setBusy(false)}}
+  async function commitImport(){if(!file||!preview||preview.errors?.length)return;if(!window.confirm("Import the validated workbook into GPCC? This will create financial records and cannot be automatically undone."))return;setBusy(true);clearStatus();const f=new FormData();f.append("file",file);f.append("commit","true");try{const res=await fetch("/api/import",{method:"POST",body:f});const j=await res.json();if(!res.ok)throw new Error(j.error||j.failures?.join(" | ")||"Import failed");setResult(j);setPreview(null);setFile(null);if(inputRef.current)inputRef.current.value="";setMessage("Import completed successfully.");loadHistory()}catch(e:any){setError(e.message||"Unable to import workbook.");loadHistory()}finally{setBusy(false)}}
+  async function loadHistory(){try{const r=await fetch("/api/import-history");const j=await r.json();if(r.ok)setHistory(j.history||[])}catch{}}
+  async function reconcile(){if(!file)return setError("Choose an Excel workbook to reconcile.");setBusy(true);clearStatus();setRecon(null);const f=new FormData();f.append("file",file);try{const r=await fetch("/api/reconcile",{method:"POST",body:f});const j=await r.json();if(!r.ok)throw new Error(j.error||"Reconciliation failed");setRecon(j);setMessage("Reconciliation completed. No data was written.")}catch(e:any){setError(e.message||"Unable to reconcile workbook.")}finally{setBusy(false)}}
+  const openTab=(t:"workspace"|"history"|"reconcile")=>{setTab(t);if(t==="history")loadHistory()};
   return <div>
-    <div className="pageHead"><div><h1>Excel Centre</h1><p className="muted">Controlled import, export, validation and reconciliation of GPCC financial data.</p></div></div>
-
-    <div className="grid">
-      <div className="card"><span className="muted">Export</span><div className="metric">XLSX</div><small className="muted">Download permitted financial data</small></div>
-      <div className="card"><span className="muted">Import limit</span><div className="metric">5,000</div><small className="muted">Rows per supported sheet</small></div>
-      <div className="card"><span className="muted">File limit</span><div className="metric">10 MB</div><small className="muted">Maximum workbook size</small></div>
-      <div className="card"><span className="muted">Workflow</span><div className="metric">Validate → Commit</div><small className="muted">Nothing is written during preview</small></div>
-    </div>
-
-    {(error || message) && <div className={`admin-alert ${error ? "error" : "success"}`} style={{marginTop:18}}>{error ? `⚠ ${error}` : `✓ ${message}`}</div>}
-
-    <div className="admin-two-col" style={{marginTop:18}}>
-      <section className="card">
-        <div className="admin-card-title"><div><h2>Export Financial Data</h2><p className="muted">Build a controlled workbook from the data you are allowed to view.</p></div></div>
-        <div className="formGrid" style={{marginTop:18}}>
-          <label>From date<input className="input" type="date" value={from} onChange={e=>setFrom(e.target.value)} /></label>
-          <label>To date<input className="input" type="date" value={to} onChange={e=>setTo(e.target.value)} /></label>
-        </div>
-        <div style={{marginTop:18}}><b>Sheets</b><div className="permission-check-list" style={{marginTop:10}}>{SHEETS.map(s=><label key={s.key} className="permission-toggle"><input type="checkbox" checked={sheets.includes("all") || sheets.includes(s.key)} onChange={()=>toggleSheet(s.key)} />{s.label}<small>{s.permission}</small></label>)}</div></div>
-        <div className="actions" style={{marginTop:20}}><button className="btn" disabled={busy} onClick={exportData}>{busy ? "Preparing…" : "Export Financial Data"}</button><span className="muted" style={{alignSelf:"center",fontSize:13}}>{selectedLabel}</span></div>
-      </section>
-
-      <section className="card">
-        <div className="admin-card-title"><div><h2>Import Financial Data</h2><p className="muted">Upload the standard GPCC workbook, validate it, then commit only after review.</p></div></div>
-        <div className="admin-note" style={{marginTop:18}}>Use the official template. Column names are the import contract. Example rows are for guidance only.</div>
-        <div style={{marginTop:18}}><input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={e=>{setFile(e.target.files?.[0]||null);setPreview(null);setResult(null);setError("")}} /></div>
-        <div className="actions" style={{marginTop:18}}><button className="btn secondary" onClick={downloadWorkbook}>Download Import Template</button><button className="btn" disabled={!file||busy} onClick={previewImport}>{busy ? "Validating…" : "Validate Workbook"}</button></div>
-        {file && <div className="admin-note" style={{marginTop:14}}><b>{file.name}</b> · {(file.size/1024).toFixed(1)} KB</div>}
-        {preview && <div className="card" style={{marginTop:16,background:"#f8fafb"}}><b>Validation preview</b><p className="muted">{preview.totalRows} rows found. {preview.errors?.length ? `${preview.errors.length} validation errors.` : "No validation errors."}</p>{preview.errors?.length ? <pre style={{whiteSpace:"pre-wrap",maxHeight:180,overflow:"auto"}}>{preview.errors.join("\n")}</pre> : <button className="btn" onClick={commitImport}>Commit Import</button>}</div>}
-        {result && <div className="admin-note" style={{marginTop:14}}><b>Imported:</b> {Object.entries(result.inserted||{}).map(([k,v])=>`${k}: ${v}`).join(" · ")}</div>}
-      </section>
-    </div>
-
-    <section className="card" style={{marginTop:18}}><h2>Import Contract</h2><p className="muted">Supported sheets and mandatory fields.</p><div className="tableWrap"><table className="table"><thead><tr><th>Sheet</th><th>Mandatory fields</th><th>Use</th></tr></thead><tbody>
-      <tr><td>Income</td><td>date, contributor, amount, mode</td><td>Income records</td></tr><tr><td>Expenses</td><td>date, requisition_no, vendor, gross_amount</td><td>Expense + TDS data</td></tr><tr><td>Fund Transfers</td><td>date, type, particulars, amount, direction</td><td>Bank / petty-cash movements</td></tr><tr><td>TDS Payments</td><td>date, amount</td><td>TDS challan payments</td></tr><tr><td>Bank Accounts</td><td>account_name, opening_balance, opening_balance_date</td><td>Administrator master setup</td></tr><tr><td>Petty Cash Accounts</td><td>account_name, opening_balance, opening_balance_date</td><td>Administrator master setup</td></tr>
-    </tbody></table></div></section>
+    <div className="pageHead"><div><h1>Excel Centre</h1><p className="muted">Controlled import, export, validation, reconciliation and data lineage for GPCC financial data.</p></div></div>
+    <div className="grid"><div className="card"><span className="muted">Export</span><div className="metric">XLSX</div><small className="muted">Permission-controlled data export</small></div><div className="card"><span className="muted">Import limit</span><div className="metric">5,000</div><small className="muted">Rows per supported sheet</small></div><div className="card"><span className="muted">File limit</span><div className="metric">10 MB</div><small className="muted">Maximum workbook size</small></div><div className="card"><span className="muted">Control</span><div className="metric">Validate → Review → Commit</div><small className="muted">Audit-backed workflow</small></div></div>
+    {(error||message)&&<div className={`admin-alert ${error?"error":"success"}`} style={{marginTop:18}}>{error?`⚠ ${error}`:`✓ ${message}`}</div>}
+    <div className="tabs" style={{marginTop:18}}><button className={tab==="workspace"?"active":""} onClick={()=>openTab("workspace")}>Data Workspace</button><button className={tab==="reconcile"?"active":""} onClick={()=>openTab("reconcile")}>Reconciliation</button><button className={tab==="history"?"active":""} onClick={()=>openTab("history")}>Import History</button></div>
+    {tab==="workspace"&&<>
+      <div className="admin-two-col" style={{marginTop:18}}>
+        <section className="card"><div className="admin-card-title"><div><h2>Export Financial Data</h2><p className="muted">Build a controlled workbook from the data you are allowed to view.</p></div></div><div className="formGrid" style={{marginTop:18}}><label>From date<input className="input" type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>To date<input className="input" type="date" value={to} onChange={e=>setTo(e.target.value)}/></label></div><div style={{marginTop:18}}><b>Sheets</b><div className="permission-check-list" style={{marginTop:10}}>{SHEETS.map(s=><label key={s.key} className="permission-toggle"><input type="checkbox" checked={sheets.includes("all")||sheets.includes(s.key)} onChange={()=>toggleSheet(s.key)}/>{s.label}<small>{s.permission}</small></label>)}</div></div><div className="actions" style={{marginTop:20}}><button className="btn" disabled={busy} onClick={exportData}>{busy?"Preparing…":"Export Financial Data"}</button><span className="muted" style={{alignSelf:"center",fontSize:13}}>{selectedLabel}</span></div></section>
+        <section className="card"><div className="admin-card-title"><div><h2>Import Financial Data</h2><p className="muted">Upload → validate → review → commit. No database write occurs during validation.</p></div></div><div className="admin-note" style={{marginTop:18}}>Use the official template. Duplicate detection and database reconciliation are available before committing.</div><div style={{marginTop:18}}><input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={e=>{setFile(e.target.files?.[0]||null);setPreview(null);setRecon(null);setResult(null);clearStatus()}}/></div><div className="actions" style={{marginTop:18}}><button className="btn secondary" onClick={downloadWorkbook}>Download Import Template</button><button className="btn" disabled={!file||busy} onClick={previewImport}>{busy?"Validating…":"Validate Workbook"}</button><button className="btn secondary" disabled={!file||busy} onClick={reconcile}>Reconcile Workbook</button></div>{file&&<div className="admin-note" style={{marginTop:14}}><b>{file.name}</b> · {(file.size/1024).toFixed(1)} KB</div>}{preview&&<div className="card" style={{marginTop:16,background:"#f8fafb"}}><b>Validation preview</b><p className="muted">{preview.totalRows} rows found. {preview.errors?.length?`${preview.errors.length} validation errors.`:"No validation errors."}</p>{preview.errors?.length?<><pre style={{whiteSpace:"pre-wrap",maxHeight:180,overflow:"auto"}}>{preview.errors.join("\n")}</pre><button className="btn secondary" onClick={()=>downloadErrors(preview.errors)}>Download Error Report</button></>:<button className="btn" onClick={commitImport}>Commit Import</button>}</div>}{result&&<div className="admin-note" style={{marginTop:14}}><b>Imported:</b> {Object.entries(result.inserted||{}).map(([k,v])=>`${k}: ${v}`).join(" · ")}</div>}</section>
+      </div>
+      <section className="card" style={{marginTop:18}}><h2>Import Contract</h2><p className="muted">Supported sheets and mandatory fields.</p><div className="tableWrap"><table className="table"><thead><tr><th>Sheet</th><th>Mandatory fields</th><th>Purpose</th></tr></thead><tbody><tr><td>Income</td><td>date, contributor, amount, mode</td><td>Income records</td></tr><tr><td>Expenses</td><td>date, requisition_no, vendor, gross_amount</td><td>Expense + TDS data</td></tr><tr><td>Fund Transfers</td><td>date, type, particulars, amount, direction</td><td>Bank / petty-cash movements</td></tr><tr><td>TDS Payments</td><td>date, amount</td><td>TDS challan payments</td></tr><tr><td>Bank Accounts</td><td>account_name, opening_balance, opening_balance_date</td><td>Administrator master setup</td></tr><tr><td>Petty Cash Accounts</td><td>account_name, opening_balance, opening_balance_date</td><td>Administrator master setup</td></tr></tbody></table></div></section>
+    </>}
+    {tab==="reconcile"&&<section className="card" style={{marginTop:18}}><h2>Data Reconciliation</h2><p className="muted">Compare a workbook against current GPCC data before import. This is read-only and does not modify records.</p>{!file?<div className="admin-note" style={{marginTop:16}}>Select a workbook in Data Workspace first, then return here.</div>:<div className="actions" style={{marginTop:16}}><button className="btn" disabled={busy} onClick={reconcile}>{busy?"Reconciling…":"Run Reconciliation"}</button></div>}{recon&&<div className="tableWrap" style={{marginTop:20}}><table className="table"><thead><tr><th>Sheet</th><th>Workbook rows</th><th>DB rows</th><th>Matched</th><th>New</th><th>Duplicates</th><th>Workbook total</th><th>DB total</th><th>Difference</th></tr></thead><tbody>{recon.results.map((r:any)=><tr key={r.sheet}><td><b>{r.sheet}</b></td><td>{r.workbookRows}</td><td>{r.databaseRows}</td><td>{r.matchedRows}</td><td>{r.newRows}</td><td>{r.duplicateRows}</td><td>{money(r.workbookTotal)}</td><td>{money(r.databaseTotal)}</td><td>{money(r.difference)}</td></tr>)}</tbody></table></div>}</section>}
+    {tab==="history"&&<section className="card" style={{marginTop:18}}><div className="admin-card-title"><div><h2>Import History</h2><p className="muted">Latest 100 completed or failed workbook imports visible to this user.</p></div><button className="btn secondary" onClick={loadHistory}>Refresh</button></div><div className="tableWrap" style={{marginTop:18}}><table className="table"><thead><tr><th>Date</th><th>File</th><th>Status</th><th>Rows</th><th>Inserted</th><th>Sheets</th></tr></thead><tbody>{history.length?history.map((h:any)=><tr key={h.id}><td>{new Date(h.imported_at).toLocaleString("en-IN")}</td><td>{h.file_name}</td><td><span className="status-pill">{h.status}</span></td><td>{h.total_rows}</td><td>{h.inserted_rows}</td><td>{Array.isArray(h.sheets)?h.sheets.map((s:any)=>s.sheet).join(", "):"—"}</td></tr>):<tr><td colSpan={6} className="muted">No import history available.</td></tr>}</tbody></table></div></section>}
   </div>;
 }
