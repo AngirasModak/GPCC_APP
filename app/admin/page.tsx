@@ -98,6 +98,7 @@ export default function AdministrationPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [schemaWarning, setSchemaWarning] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [auditSearch, setAuditSearch] = useState("");
   const [userFilter, setUserFilter] = useState<"All" | Status>("All");
@@ -120,32 +121,46 @@ export default function AdministrationPage() {
     setLoading(true);
     clearFeedback();
     try {
-      const [profilesResult, permissionsResult, banksResult, cashResult, auditResult] =
-        await Promise.all([
-          supabase
-            .from("profiles")
-            .select("id,full_name,email,role,status,created_at,updated_at")
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("role_permissions")
-            .select("role,module,action")
-            .order("role")
-            .order("module")
-            .order("action"),
-          supabase
-            .from("bank_accounts")
-            .select("id,account_name,opening_balance,opening_balance_date,is_active,created_at")
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("petty_cash_accounts")
-            .select("id,account_name,opening_balance,opening_balance_date,is_active,created_at")
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("audit_logs")
-            .select("id,occurred_at,actor_id,action,entity_type,entity_id,old_data,new_data,metadata")
-            .order("occurred_at", { ascending: false })
-            .limit(250),
-        ]);
+      // Keep the administration centre usable while an older database is being
+      // migrated. The email column was added after the original schema; if the
+      // deployed database does not have it yet, load the rest of the profile
+      // record and show a migration notice instead of blanking the whole page.
+      let profilesResult = await supabase
+        .from("profiles")
+        .select("id,full_name,email,role,status,created_at,updated_at")
+        .order("created_at", { ascending: false });
+
+      if (profilesResult.error?.message?.toLowerCase().includes("profiles.email")) {
+        setSchemaWarning("The deployed Supabase database is missing the profiles.email column. Run supabase/admin_migration.sql once, then refresh this page.");
+        profilesResult = await supabase
+          .from("profiles")
+          .select("id,full_name,role,status,created_at,updated_at")
+          .order("created_at", { ascending: false }) as typeof profilesResult;
+      } else {
+        setSchemaWarning("");
+      }
+
+      const [permissionsResult, banksResult, cashResult, auditResult] = await Promise.all([
+        supabase
+          .from("role_permissions")
+          .select("role,module,action")
+          .order("role")
+          .order("module")
+          .order("action"),
+        supabase
+          .from("bank_accounts")
+          .select("id,account_name,opening_balance,opening_balance_date,is_active,created_at")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("petty_cash_accounts")
+          .select("id,account_name,opening_balance,opening_balance_date,is_active,created_at")
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("audit_logs")
+          .select("id,occurred_at,actor_id,action,entity_type,entity_id,old_data,new_data,metadata")
+          .order("occurred_at", { ascending: false })
+          .limit(250),
+      ]);
 
       const firstError =
         profilesResult.error ||
@@ -310,6 +325,7 @@ export default function AdministrationPage() {
         <button className="btn secondary" onClick={loadAll} disabled={loading || busy}>↻ Refresh</button>
       </div>
 
+      {schemaWarning && <div className="admin-alert warning">⚠ {schemaWarning}</div>}
       {error && <div className="admin-alert error">⚠ {error}</div>}
       {message && <div className="admin-alert success">✓ {message}</div>}
 
