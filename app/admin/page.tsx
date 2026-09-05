@@ -627,22 +627,43 @@ export default function AdministrationPage() {
           </div>
 
           <div className="card admin-category-card">
-            <div className="admin-card-title">
-              <div><h3>Expense Categories</h3><p className="muted">Maintain the controlled categories available in Expenditure & TDS. Archived categories remain on historical transactions.</p></div>
-              <span className="impact-chip">{expenseCategories.filter((c) => c.is_active).length} active</span>
-            </div>
-            <div className="admin-category-grid">
-              <div className="admin-form-card">
-                <label>Category name<input className="input" placeholder="e.g. Maintenance" value={categoryForm.name} onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })} /></label>
-                <label>Description<input className="input" placeholder="Optional description" value={categoryForm.description} onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })} /></label>
-                <div className="admin-category-form-row">
-                  <label>Display order<input className="input" type="number" min="0" value={categoryForm.sort_order} onChange={(e) => setCategoryForm({ ...categoryForm, sort_order: Number(e.target.value || 0) })} /></label>
-                  <label className="admin-check"><input type="checkbox" checked={categoryForm.is_active} onChange={(e) => setCategoryForm({ ...categoryForm, is_active: e.target.checked })} /> Active</label>
-                </div>
-                <div className="actions"><button className="btn" disabled={busy} onClick={submitCategory}>{editingCategory ? "Save Category" : "Add Category"}</button>{editingCategory && <button className="btn secondary" disabled={busy} onClick={() => { setEditingCategory(null); setCategoryForm({ name: "", description: "", is_active: true, sort_order: 0 }); }}>Cancel</button>}</div>
+            <div className="admin-category-hero">
+              <div className="admin-category-hero-icon">▦</div>
+              <div className="admin-category-hero-copy">
+                <div className="excel-kicker">MASTER DATA</div>
+                <h3>Expense Categories</h3>
+                <p>Standardise how expenditure is classified across transactions, reports and Excel imports.</p>
               </div>
-              <div className="category-list">
-                {expenseCategories.length === 0 ? <div className="empty">No expense categories configured.</div> : expenseCategories.map((category) => <div className="category-list-item" key={category.id}><div><b>{category.name}</b><small>{category.description || "No description"} · Order {category.sort_order}</small></div><div className="account-row-actions">{category.is_active ? <span className="admin-status admin-approved">Active</span> : <span className="admin-status admin-inactive">Archived</span>}<button className="btn secondary small-btn" disabled={busy} onClick={() => startEditCategory(category)}>Edit</button>{category.is_active && <button className="btn danger small-btn" disabled={busy} onClick={() => deleteCategory(category.id)}>Archive</button>}</div></div>)}
+              <div className="admin-category-metrics">
+                <div><strong>{expenseCategories.length}</strong><span>Total</span></div>
+                <div className="active"><strong>{expenseCategories.filter((c) => c.is_active).length}</strong><span>Active</span></div>
+                <div className="archived"><strong>{expenseCategories.filter((c) => !c.is_active).length}</strong><span>Archived</span></div>
+              </div>
+            </div>
+
+            <div className="admin-category-body">
+              <div className="admin-category-editor">
+                <div className="admin-category-editor-head">
+                  <div><span className="admin-form-step">{editingCategory ? "02" : "01"}</span><div><h4>{editingCategory ? "Edit category" : "Create a category"}</h4><p>{editingCategory ? "Update the master record without affecting historical transactions." : "Add a controlled category for the Expenditure & TDS module."}</p></div></div>
+                  {editingCategory && <span className="impact-chip">Editing</span>}
+                </div>
+                <div className="admin-category-field-grid">
+                  <label className="category-field-wide"><span>Category name</span><input className="input" placeholder="e.g. Maintenance" value={categoryForm.name} onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })} /><small>Use a clear, reusable business classification.</small></label>
+                  <label><span>Description</span><input className="input" placeholder="e.g. Building repairs and upkeep" value={categoryForm.description} onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })} /><small>Optional context shown to administrators.</small></label>
+                  <label><span>Display order</span><input className="input" type="number" min="0" value={categoryForm.sort_order} onChange={(e) => setCategoryForm({ ...categoryForm, sort_order: Number(e.target.value || 0) })} /><small>Lower numbers appear first.</small></label>
+                </div>
+                <label className="category-active-toggle"><input type="checkbox" checked={categoryForm.is_active} onChange={(e) => setCategoryForm({ ...categoryForm, is_active: e.target.checked })} /><span><b>Active category</b><small>Available for new expenditure entries</small></span></label>
+                <div className="actions category-actions"><button className="btn" disabled={busy} onClick={submitCategory}>{editingCategory ? "Save Changes" : "Add Category"}</button>{editingCategory && <button className="btn secondary" disabled={busy} onClick={() => { setEditingCategory(null); setCategoryForm({ name: "", description: "", is_active: true, sort_order: 0 }); }}>Cancel</button>}</div>
+              </div>
+
+              <div className="admin-category-library">
+                <div className="admin-category-library-head"><div><h4>Category library</h4><p>Active categories appear in the expenditure dropdown.</p></div><span className="impact-chip">{expenseCategories.filter((c) => c.is_active).length} available</span></div>
+                <div className="category-list">
+                  {expenseCategories.length === 0 ? <div className="category-empty"><div>▦</div><b>No categories yet</b><span>Create your first expense category to start classifying transactions.</span></div> : expenseCategories.map((category, index) => <div className={`category-list-item ${!category.is_active ? "archived" : ""}`} key={category.id}>
+                    <div className="category-list-main"><div className="category-number">{String(index + 1).padStart(2, "0")}</div><div><div className="category-title-row"><b>{category.name}</b>{category.is_active ? <span className="category-status active">Active</span> : <span className="category-status archived">Archived</span>}</div><small>{category.description || "No description provided"}</small><span className="category-order">Display order · {category.sort_order}</span></div></div>
+                    <div className="account-row-actions"><button className="btn secondary small-btn" disabled={busy} onClick={() => startEditCategory(category)}>Edit</button>{category.is_active && <button className="btn danger small-btn" disabled={busy} onClick={() => deleteCategory(category.id)}>Archive</button>}</div>
+                  </div>)}
+                </div>
               </div>
             </div>
           </div>
