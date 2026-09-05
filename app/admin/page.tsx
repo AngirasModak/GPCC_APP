@@ -123,6 +123,8 @@ export default function AdministrationPage() {
   const [residentForm, setResidentForm] = useState({ flat_no: "", owner_name: "", flat_type: "" as FlatType | "", has_tenant: false, tenant_name: "", is_active: true });
   const [editingResident, setEditingResident] = useState<string | null>(null);
   const [residentFile, setResidentFile] = useState<File | null>(null);
+  const [residentFileBuffer, setResidentFileBuffer] = useState<ArrayBuffer | null>(null);
+  const [residentFileInfo, setResidentFileInfo] = useState<{ name: string; size: number } | null>(null);
   const [residentImportPreview, setResidentImportPreview] = useState<Array<{ flat_no: string; flat_type: FlatType; owner_name: string; has_tenant: boolean; tenant_name: string | null }>>([]);
   const [residentPanel, setResidentPanel] = useState<"property" | "flatType" | "occupancy">("property");
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -615,13 +617,58 @@ export default function AdministrationPage() {
     XLSX.writeFile(wb, "GPCC_Residential_Directory_Template.xlsx");
   };
 
+  const readResidentFile = async (file: File) => {
+    clearFeedback();
+    setResidentImportPreview([]);
+    if (!file) return;
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      setResidentFile(null);
+      setResidentFileBuffer(null);
+      setResidentFileInfo(null);
+      setError("Please select an Excel workbook (.xlsx or .xls).");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setResidentFile(null);
+      setResidentFileBuffer(null);
+      setResidentFileInfo(null);
+      setError("The residential workbook must be 10 MB or smaller.");
+      return;
+    }
+    try {
+      // Snapshot the file immediately. Retaining a live File reference until
+      // a later button click can fail in Chrome when the local file handle
+      // becomes unavailable. Keeping an ArrayBuffer avoids that issue.
+      let buffer: ArrayBuffer;
+      try {
+        buffer = await file.arrayBuffer();
+      } catch {
+        // Fallback for browsers/environments that reject a retained local-file reference.
+        buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => reader.result instanceof ArrayBuffer ? resolve(reader.result) : reject(new Error("Unable to read the selected workbook."));
+          reader.onerror = () => reject(reader.error || new Error("Unable to read the selected workbook."));
+          reader.readAsArrayBuffer(file);
+        });
+      }
+      setResidentFile(file);
+      setResidentFileBuffer(buffer);
+      setResidentFileInfo({ name: file.name, size: file.size });
+      setMessage(`${file.name} is ready. Click Validate Workbook to continue.`);
+    } catch (e: any) {
+      setResidentFile(null);
+      setResidentFileBuffer(null);
+      setResidentFileInfo(null);
+      setError(e?.message || "The selected workbook could not be read. Please choose the file again.");
+    }
+  };
+
   const parseResidentWorkbook = async () => {
-    if (!residentFile) { setError("Choose an Excel file first."); return; }
+    if (!residentFileBuffer) { setError("Choose an Excel file first."); return; }
     clearFeedback();
     try {
       const XLSX = await import("xlsx");
-      const buffer = await residentFile.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: "array" });
+      const wb = XLSX.read(residentFileBuffer, { type: "array" });
       const sheetName = wb.SheetNames.find((n: string) => /flat|house|resident|unit/i.test(n)) || wb.SheetNames[0];
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[sheetName], { defval: "" });
       const normalized = rows.map((r) => {
@@ -646,7 +693,7 @@ export default function AdministrationPage() {
       const { error } = await supabase.rpc("admin_import_residential_units", { p_rows: residentImportPreview });
       if (error) throw new Error(error.message);
       setMessage(`${residentImportPreview.length} residential records imported.`);
-      setResidentImportPreview([]); setResidentFile(null); await loadAll();
+      setResidentImportPreview([]); setResidentFile(null); setResidentFileBuffer(null); setResidentFileInfo(null); await loadAll();
     } catch (e: any) { setError(e?.message || "Unable to import residential records."); }
     finally { setBusy(false); }
   };
@@ -795,7 +842,14 @@ export default function AdministrationPage() {
               </div>
               <div className="admin-category-library">
                 <div className="admin-category-library-head"><div><h4>Import residences</h4><p>Upload an Excel workbook with Flat / House No., Flat Type, Owner Name, Tenant Yes/No and Tenant Name.</p></div></div>
-                <div className="resident-import-box"><div className="resident-import-head"><div><b>Bulk import</b><small>Required: Flat / House No., Flat Type (LIG/MIG/HIG) and Owner Name. Optional occupancy fields: Tenant Yes/No and Tenant Name.</small></div><button className="btn secondary small-btn" type="button" onClick={downloadResidentTemplate}>Download Template</button></div><input type="file" accept=".xlsx,.xls" onChange={e => {setResidentFile(e.target.files?.[0] || null);setResidentImportPreview([])}}/><div className="actions"><button className="btn secondary" disabled={!residentFile || busy} onClick={parseResidentWorkbook}>Validate Workbook</button>{residentImportPreview.length > 0 && <button className="btn" disabled={busy} onClick={commitResidentImport}>Import {residentImportPreview.length} Rows</button>}</div>{residentImportPreview.length > 0 && <div className="resident-preview"><b>{residentImportPreview.length} rows validated</b><div className="tableWrap"><table className="table"><thead><tr><th>Flat / House</th><th>Type</th><th>Owner</th><th>Tenant</th><th>Tenant Name</th></tr></thead><tbody>{residentImportPreview.slice(0,8).map((r,i)=><tr key={i}><td>{r.flat_no}</td><td><span className="flat-type-badge">{r.flat_type || "—"}</span></td><td>{r.owner_name}</td><td>{r.has_tenant ? "Yes" : "No"}</td><td>{r.tenant_name || "—"}</td></tr>)}</tbody></table></div>{residentImportPreview.length>8 && <small>Showing first 8 rows.</small>}</div>}</div>
+                <div className="resident-import-box"><div className="resident-import-head"><div><b>Bulk import</b><small>Required: Flat / House No., Flat Type (LIG/MIG/HIG) and Owner Name. Optional occupancy fields: Tenant Yes/No and Tenant Name.</small></div><button className="btn secondary small-btn" type="button" onClick={downloadResidentTemplate}>Download Template</button></div><div className="resident-file-picker">
+  <label className="resident-dropzone">
+    <input type="file" accept=".xlsx,.xls" onChange={e => { const file = e.target.files?.[0]; if (file) void readResidentFile(file); e.currentTarget.value = ""; }} />
+    <span className="resident-dropzone-icon">↑</span>
+    <span><b>{residentFileInfo ? residentFileInfo.name : "Choose Excel workbook"}</b><small>{residentFileInfo ? `${(residentFileInfo.size / 1024).toFixed(1)} KB · Ready for validation` : "Drag & drop or click to browse · .xlsx / .xls · max 10 MB"}</small></span>
+    <span className="resident-browse">Browse</span>
+  </label>
+</div><div className="actions"><button className="btn secondary" disabled={!residentFile || busy} onClick={parseResidentWorkbook}>Validate Workbook</button>{residentImportPreview.length > 0 && <button className="btn" disabled={busy} onClick={commitResidentImport}>Import {residentImportPreview.length} Rows</button>}</div>{residentImportPreview.length > 0 && <div className="resident-preview"><b>{residentImportPreview.length} rows validated</b><div className="tableWrap"><table className="table"><thead><tr><th>Flat / House</th><th>Type</th><th>Owner</th><th>Tenant</th><th>Tenant Name</th></tr></thead><tbody>{residentImportPreview.slice(0,8).map((r,i)=><tr key={i}><td>{r.flat_no}</td><td><span className="flat-type-badge">{r.flat_type || "—"}</span></td><td>{r.owner_name}</td><td>{r.has_tenant ? "Yes" : "No"}</td><td>{r.tenant_name || "—"}</td></tr>)}</tbody></table></div>{residentImportPreview.length>8 && <small>Showing first 8 rows.</small>}</div>}</div>
               </div>
             </div>
             <div className="resident-directory"><div className="admin-category-library-head"><div><h4>Residential directory</h4><p>Only active records are available for new income entries.</p></div></div>{residentialUnits.length === 0 ? <div className="category-empty"><div>⌂</div><b>No residences configured</b><span>Add a Flat / House No. or import your directory.</span></div> : <div className="resident-grid">{residentialUnits.map(r => <div className={`resident-item ${!r.is_active ? "archived" : ""}`} key={r.id}><div className="resident-item-top"><div className="resident-flat">{r.flat_no}<span className={`flat-type-badge flat-type-${(r.flat_type || "unknown").toLowerCase()}`}>{r.flat_type || "Unclassified"}</span></div><span className={`category-status ${r.is_active ? "active" : "archived"}`}>{r.is_active ? "Active" : "Archived"}</span></div><b>{r.owner_name}</b><small>{r.has_tenant ? `Tenant · ${r.tenant_name}` : "Owner occupied"}</small><div className="account-row-actions"><button className="btn secondary small-btn" disabled={busy} onClick={() => startEditResident(r)}>Edit</button>{r.is_active && <button className="btn danger small-btn" disabled={busy} onClick={() => archiveResident(r.id)}>Archive</button>}</div></div>)}</div>}</div>
