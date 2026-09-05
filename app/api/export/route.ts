@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   const requested = (url.searchParams.get("sheets") || "all").split(",").filter(Boolean);
+  if (from && to && to < from) return NextResponse.json({ error: "To date cannot be earlier than From date" }, { status: 400 });
 
   const workbook = XLSX.utils.book_new();
   const exported: string[] = [];
