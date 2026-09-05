@@ -95,14 +95,12 @@ export default function AppShell({children}:{children:React.ReactNode}) {
 
   if (!ready) return <Gate message="Verifying secure account access…" />;
   if (!profile || profile.status !== "Approved") {
-    window.location.replace("/login");
     return <Gate message="Authentication required" />;
   }
 
   const allowed = items.filter(i => (i[3] as readonly string[]).includes(profile.role));
   const canViewRoute = allowed.some(i => i[0] === pathname);
   if (!canViewRoute) {
-    window.location.replace("/dashboard");
     return <Gate message="Opening your authorized workspace…" />;
   }
 
