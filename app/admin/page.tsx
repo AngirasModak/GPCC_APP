@@ -42,6 +42,7 @@ type BankAccount = {
 };
 
 type CashAccount = BankAccount;
+type ExpenseCategory = { id: string; name: string; description: string | null; is_active: boolean; sort_order: number; created_at: string };
 
 type Permission = {
   role: Role;
@@ -115,6 +116,7 @@ export default function AdministrationPage() {
   const [showCustomRoleForm, setShowCustomRoleForm] = useState(false);
   const [banks, setBanks] = useState<BankAccount[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -129,6 +131,8 @@ export default function AdministrationPage() {
   const [accountKind, setAccountKind] = useState<"bank" | "cash">("bank");
   const [accountForm, setAccountForm] = useState(emptyAccount);
   const [editingAccount, setEditingAccount] = useState<string | null>(null);
+  const [categoryForm, setCategoryForm] = useState({ name: "", description: "", is_active: true, sort_order: 0 });
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     type: "approve" | "reject" | "inactive" | "activate";
     user: Profile;
@@ -162,7 +166,7 @@ export default function AdministrationPage() {
         setSchemaWarning("");
       }
 
-      const [permissionsResult, customRolesResult, customPermissionsResult, banksResult, cashResult, auditResult] = await Promise.all([
+      const [permissionsResult, customRolesResult, customPermissionsResult, banksResult, cashResult, categoriesResult, auditResult] = await Promise.all([
         supabase
           .from("role_permissions")
           .select("role,module,action")
@@ -187,6 +191,11 @@ export default function AdministrationPage() {
           .from("petty_cash_accounts")
           .select("id,account_name,opening_balance,opening_balance_date,is_active,created_at")
           .order("created_at", { ascending: false }),
+        supabase
+          .from("expense_categories")
+          .select("id,name,description,is_active,sort_order,created_at")
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true }),
         supabase
           .from("audit_logs")
           .select("id,occurred_at,actor_id,action,entity_type,entity_id,old_data,new_data,metadata")
@@ -217,6 +226,7 @@ export default function AdministrationPage() {
         customPermissionsResult.error ||
         banksResult.error ||
         cashResult.error ||
+        categoriesResult.error ||
         resolvedAuditResult.error;
       if (firstError) throw new Error(firstError.message);
 
@@ -229,6 +239,7 @@ export default function AdministrationPage() {
       setProfiles(((profilesResult.data || []) as Profile[]).map((p) => ({ ...p, custom_role_name: p.custom_role_id ? roleNames.get(p.custom_role_id) || null : null })));
       setBanks((banksResult.data || []) as BankAccount[]);
       setCashAccounts((cashResult.data || []) as CashAccount[]);
+      setExpenseCategories((categoriesResult.data || []) as ExpenseCategory[]);
       setAuditLogs((resolvedAuditResult.data || []) as AuditLog[]);
     } catch (e: any) {
       setError(e.message || "Unable to load administration data.");
@@ -484,6 +495,41 @@ export default function AdministrationPage() {
     }
   };
 
+  const submitCategory = async () => {
+    clearFeedback();
+    const name = categoryForm.name.trim();
+    if (!name) { setError("Category name is required."); return; }
+    setBusy(true);
+    try {
+      const rpcName = editingCategory ? "admin_update_expense_category" : "admin_create_expense_category";
+      const args = editingCategory
+        ? { p_category_id: editingCategory, p_name: name, p_description: categoryForm.description.trim() || null, p_is_active: categoryForm.is_active, p_sort_order: Number(categoryForm.sort_order || 0) }
+        : { p_name: name, p_description: categoryForm.description.trim() || null, p_is_active: categoryForm.is_active, p_sort_order: Number(categoryForm.sort_order || 0) };
+      const { error: rpcError } = await supabase.rpc(rpcName, args);
+      if (rpcError) throw new Error(rpcError.message);
+      setMessage(`Category ${editingCategory ? "updated" : "created"}.`);
+      setEditingCategory(null);
+      setCategoryForm({ name: "", description: "", is_active: true, sort_order: 0 });
+      await loadAll();
+    } catch (e: any) { setError(e?.message || "Unable to save category."); } finally { setBusy(false); }
+  };
+
+  const deleteCategory = async (id: string) => {
+    if (!confirm("Archive this expense category? Existing transactions will retain the category.")) return;
+    setBusy(true); clearFeedback();
+    try {
+      const { error: rpcError } = await supabase.rpc("admin_delete_expense_category", { p_category_id: id });
+      if (rpcError) throw new Error(rpcError.message);
+      setMessage("Category archived. Existing transactions were not changed.");
+      await loadAll();
+    } catch (e: any) { setError(e?.message || "Unable to archive category."); } finally { setBusy(false); }
+  };
+
+  const startEditCategory = (category: ExpenseCategory) => {
+    setEditingCategory(category.id);
+    setCategoryForm({ name: category.name, description: category.description || "", is_active: category.is_active, sort_order: category.sort_order || 0 });
+  };
+
   const startEditAccount = (kind: "bank" | "cash", account: BankAccount) => {
     setAccountKind(kind);
     setEditingAccount(account.id);
@@ -577,6 +623,27 @@ export default function AdministrationPage() {
             </div>
             <div className="card"><div className="admin-card-title"><div><h3>{accountKind === "bank" ? "Bank accounts" : "Petty cash accounts"}</h3><p className="muted">Active and historical master records.</p></div></div>
               <AccountList accounts={accountKind === "bank" ? banks : cashAccounts} kind={accountKind} onEdit={startEditAccount} onDelete={deleteAccount} />
+            </div>
+          </div>
+
+          <div className="card admin-category-card">
+            <div className="admin-card-title">
+              <div><h3>Expense Categories</h3><p className="muted">Maintain the controlled categories available in Expenditure & TDS. Archived categories remain on historical transactions.</p></div>
+              <span className="impact-chip">{expenseCategories.filter((c) => c.is_active).length} active</span>
+            </div>
+            <div className="admin-category-grid">
+              <div className="admin-form-card">
+                <label>Category name<input className="input" placeholder="e.g. Maintenance" value={categoryForm.name} onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })} /></label>
+                <label>Description<input className="input" placeholder="Optional description" value={categoryForm.description} onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })} /></label>
+                <div className="admin-category-form-row">
+                  <label>Display order<input className="input" type="number" min="0" value={categoryForm.sort_order} onChange={(e) => setCategoryForm({ ...categoryForm, sort_order: Number(e.target.value || 0) })} /></label>
+                  <label className="admin-check"><input type="checkbox" checked={categoryForm.is_active} onChange={(e) => setCategoryForm({ ...categoryForm, is_active: e.target.checked })} /> Active</label>
+                </div>
+                <div className="actions"><button className="btn" disabled={busy} onClick={submitCategory}>{editingCategory ? "Save Category" : "Add Category"}</button>{editingCategory && <button className="btn secondary" disabled={busy} onClick={() => { setEditingCategory(null); setCategoryForm({ name: "", description: "", is_active: true, sort_order: 0 }); }}>Cancel</button>}</div>
+              </div>
+              <div className="category-list">
+                {expenseCategories.length === 0 ? <div className="empty">No expense categories configured.</div> : expenseCategories.map((category) => <div className="category-list-item" key={category.id}><div><b>{category.name}</b><small>{category.description || "No description"} · Order {category.sort_order}</small></div><div className="account-row-actions">{category.is_active ? <span className="admin-status admin-approved">Active</span> : <span className="admin-status admin-inactive">Archived</span>}<button className="btn secondary small-btn" disabled={busy} onClick={() => startEditCategory(category)}>Edit</button>{category.is_active && <button className="btn danger small-btn" disabled={busy} onClick={() => deleteCategory(category.id)}>Archive</button>}</div></div>)}
+              </div>
             </div>
           </div>
         </section>

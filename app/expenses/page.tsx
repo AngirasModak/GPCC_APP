@@ -51,9 +51,19 @@ export default function ExpensesPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  const [categories, setCategories] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
 
   const load = async () => {
     setMsg("");
+
+    const { data: categoryData, error: categoryError } = await supabase
+      .from("expense_categories")
+      .select("id,name,is_active")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+
+    if (!categoryError) setCategories((categoryData || []) as { id: string; name: string; is_active: boolean }[]);
 
     const { data, error } = await supabase
       .from("expenses")
@@ -455,16 +465,23 @@ export default function ExpensesPage() {
                 }
               />
 
-              <Field
-                label="Category"
-                value={form.category}
-                set={(v) =>
-                  setForm({
-                    ...form,
-                    category: v,
-                  })
-                }
-              />
+              <label>
+                <span style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                  <span>Category</span>
+                  <a href="/admin" className="field-hint" target="_blank" rel="noreferrer">Manage categories</a>
+                </span>
+                <select
+                  className="input"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                >
+                  <option value="">Select category</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.name}>{category.name}</option>
+                  ))}
+                </select>
+                {categories.length === 0 && <small className="field-hint">No active categories configured. An Administrator can add them from Administration → Financial Masters.</small>}
+              </label>
 
               <Field
                 label="Bill Number"

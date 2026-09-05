@@ -879,3 +879,103 @@ revoke all on function public.record_excel_import(text,bigint,text,integer,integ
 grant execute on function public.record_excel_import(text,bigint,text,integer,integer,jsonb,jsonb) to authenticated;
 
 commit;
+
+-- ================================================================
+-- GPCC V18: EXPENSE CATEGORY MASTER
+-- ================================================================
+begin;
+
+create table if not exists public.expense_categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  description text,
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists uq_expense_categories_name_ci
+  on public.expense_categories (lower(trim(name)));
+create index if not exists idx_expense_categories_active_order
+  on public.expense_categories(is_active, sort_order, name);
+
+alter table public.expense_categories enable row level security;
+drop policy if exists expense_categories_read on public.expense_categories;
+create policy expense_categories_read on public.expense_categories
+  for select to authenticated
+  using (public.has_permission('expenses','view'));
+
+create or replace function public.admin_create_expense_category(
+  p_name text,
+  p_description text default null,
+  p_is_active boolean default true,
+  p_sort_order integer default 0
+) returns public.expense_categories
+language plpgsql security definer set search_path=public as $$
+declare actor_role public.gpcc_role; r public.expense_categories;
+begin
+  if not public.has_permission('category_setup','manage') then raise exception 'Expense category administration privilege is required'; end if;
+  if nullif(trim(p_name),'') is null then raise exception 'Category name is required'; end if;
+  insert into public.expense_categories(name,description,is_active,sort_order,created_by)
+  values(trim(p_name),nullif(trim(p_description),''),coalesce(p_is_active,true),greatest(coalesce(p_sort_order,0),0),auth.uid())
+  returning * into r;
+  insert into public.audit_logs(actor_id,action,entity_type,entity_id,new_data,metadata)
+  values(auth.uid(),'INSERT','expense_category',r.id::text,to_jsonb(r),jsonb_build_object('source','administration'));
+  return r;
+exception when unique_violation then
+  raise exception 'An expense category with this name already exists';
+end; $$;
+revoke all on function public.admin_create_expense_category(text,text,boolean,integer) from public;
+grant execute on function public.admin_create_expense_category(text,text,boolean,integer) to authenticated;
+
+create or replace function public.admin_update_expense_category(
+  p_category_id uuid,
+  p_name text,
+  p_description text default null,
+  p_is_active boolean default true,
+  p_sort_order integer default 0
+) returns public.expense_categories
+language plpgsql security definer set search_path=public as $$
+declare r public.expense_categories; old_row public.expense_categories;
+begin
+  if not public.has_permission('category_setup','manage') then raise exception 'Expense category administration privilege is required'; end if;
+  if nullif(trim(p_name),'') is null then raise exception 'Category name is required'; end if;
+  select * into old_row from public.expense_categories where id=p_category_id for update;
+  if not found then raise exception 'Expense category not found'; end if;
+  update public.expense_categories
+  set name=trim(p_name), description=nullif(trim(p_description),''), is_active=coalesce(p_is_active,true), sort_order=greatest(coalesce(p_sort_order,0),0), updated_at=now()
+  where id=p_category_id returning * into r;
+  insert into public.audit_logs(actor_id,action,entity_type,entity_id,old_data,new_data,metadata)
+  values(auth.uid(),'UPDATE','expense_category',r.id::text,to_jsonb(old_row),to_jsonb(r),jsonb_build_object('source','administration'));
+  return r;
+exception when unique_violation then
+  raise exception 'An expense category with this name already exists';
+end; $$;
+revoke all on function public.admin_update_expense_category(uuid,text,text,boolean,integer) from public;
+grant execute on function public.admin_update_expense_category(uuid,text,text,boolean,integer) to authenticated;
+
+create or replace function public.admin_delete_expense_category(p_category_id uuid)
+returns boolean
+language plpgsql security definer set search_path=public as $$
+declare old_row public.expense_categories;
+begin
+  if not public.has_permission('category_setup','manage') then raise exception 'Expense category administration privilege is required'; end if;
+  select * into old_row from public.expense_categories where id=p_category_id for update;
+  if not found then raise exception 'Expense category not found'; end if;
+  update public.expense_categories set is_active=false, updated_at=now() where id=p_category_id;
+  insert into public.audit_logs(actor_id,action,entity_type,entity_id,old_data,new_data,metadata)
+  values(auth.uid(),'ARCHIVE','expense_category',p_category_id::text,to_jsonb(old_row),jsonb_build_object('is_active',false),jsonb_build_object('source','administration'));
+  return true;
+end; $$;
+revoke all on function public.admin_delete_expense_category(uuid) from public;
+grant execute on function public.admin_delete_expense_category(uuid) to authenticated;
+
+-- Add category management to the authoritative permission catalog and grant it
+-- only to the built-in Administrator role by default. Existing Editor/Member
+-- access is unchanged.
+insert into public.permission_catalog(module,action) values ('category_setup','manage') on conflict do nothing;
+insert into public.role_permissions(role,module,action) values ('Administrator','category_setup','manage') on conflict do nothing;
+
+commit;
