@@ -148,3 +148,68 @@
 
 /* V27 Event & Expenditure Governance */
 .modal.modalWide{width:min(900px,94vw);max-height:90vh;overflow:auto}.formSection{margin-top:16px;padding:16px;border:1px solid #e5ecea;border-radius:14px;background:linear-gradient(180deg,#fbfdfd,#f7faf9)}.formSectionTitle{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#0f766e;margin-bottom:14px}.formSection .formGrid{margin-bottom:0}.field-hint{font-size:11px;color:#6b7280}.formSection label{font-weight:600;color:#475569}.formSection label .input{margin-top:6px;font-weight:400;color:#172033}
+
+
+/* V28 — Excel Centre Control Workspace */
+.excel-centre-v2{max-width:1500px;margin:0 auto;padding-bottom:28px}
+.excel-hero{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:4px 2px 22px}
+.excel-hero h1{margin:5px 0 8px;font-size:38px;letter-spacing:-.035em;color:#1d2a3a}
+.excel-hero p{margin:0;max-width:720px;color:#617184;font-size:14px;line-height:1.6}
+.excel-kicker{display:inline-block;color:#0b756c;font-size:10px;font-weight:900;letter-spacing:.2em}
+.excel-hero-controls{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+.excel-security-chip{display:flex;align-items:center;gap:7px;padding:9px 12px;border:1px solid #dce9e5;border-radius:999px;background:#f7fbfa;color:#385866;font-size:11px;font-weight:800;white-space:nowrap}
+.excel-security-chip span{display:grid;place-items:center;width:19px;height:19px;border-radius:50%;background:#e5f4ef;color:#08766c}
+.excel-metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.excel-metric-card{min-height:112px;display:flex;align-items:center;gap:13px;padding:17px;border:1px solid #dce7e5;border-radius:18px;background:linear-gradient(145deg,#fff,#f7faf9);box-shadow:0 7px 24px rgba(12,61,54,.045)}
+.excel-metric-icon{width:44px;height:44px;display:grid;place-items:center;flex:0 0 auto;border-radius:13px;background:#e8f4f1;color:#08766c;font-weight:900;font-size:16px}
+.excel-metric-card small{display:block;color:#778797;font-size:9px;font-weight:900;letter-spacing:.11em}
+.excel-metric-card b{display:block;margin-top:4px;color:#233146;font-size:21px;line-height:1.2}
+.excel-metric-card em{display:block;margin-top:4px;color:#788797;font-size:10px;font-style:normal}
+.excel-metric-flow b{font-size:14px}
+.excel-status-banner{display:flex;align-items:center;gap:12px;margin-top:16px;padding:13px 16px;border-radius:14px;border:1px solid;background:#fff}
+.excel-status-banner>span{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;font-weight:900}
+.excel-status-banner div{display:flex;flex-direction:column;gap:2px}.excel-status-banner b{font-size:12px}.excel-status-banner small{font-size:11px}
+.excel-status-banner.success{border-color:#b9ddce;background:#f2faf6;color:#176651}.excel-status-banner.success>span{background:#d9f1e5;color:#08765f}
+.excel-status-banner.error{border-color:#efc6c1;background:#fff7f6;color:#9b3b34}.excel-status-banner.error>span{background:#ffe2df;color:#b64037}
+.excel-tabbar-v2{margin-top:18px;border:1px solid #dbe7e4;background:linear-gradient(90deg,#f1f6f5,#eaf1f3)}
+.excel-workspace-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
+.excel-panel-card{padding:22px;border:1px solid #dce7e4;border-radius:20px;background:linear-gradient(160deg,#fff,#f9fbfb);box-shadow:0 8px 28px rgba(14,54,48,.045)}
+.excel-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.excel-panel-head h2{margin:4px 0 6px;color:#243247;font-size:22px;letter-spacing:-.02em}.excel-panel-head p{margin:0;color:#6d7d8f;font-size:12px;line-height:1.55}
+.excel-panel-eyebrow{display:block;color:#0d766d;font-size:9px;font-weight:900;letter-spacing:.16em}
+.excel-panel-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:#e9f5f2;color:#08766c;font-size:20px;font-weight:900;flex:0 0 auto}
+.excel-date-grid{margin-top:20px}.excel-date-grid label{font-size:11px;font-weight:800;color:#526274}.excel-date-grid .input{margin-top:7px}
+.excel-dataset-head{display:flex;align-items:center;justify-content:space-between;margin-top:20px}.excel-dataset-head>div{display:flex;flex-direction:column;gap:2px}.excel-dataset-head b{font-size:13px;color:#334255}.excel-dataset-head small{font-size:10px;color:#7a8998}
+.excel-text-button{border:0;background:transparent;color:#08756c;font-size:11px;font-weight:800;cursor:pointer}
+.excel-dataset-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:11px}
+.excel-dataset-card{position:relative;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e1e9e7;border-radius:13px;background:#fff;cursor:pointer;transition:.15s ease}
+.excel-dataset-card:hover{border-color:#9cc9c1;transform:translateY(-1px)}.excel-dataset-card.selected{border-color:#88bcb3;background:#f6fbf9}
+.excel-dataset-card input{position:absolute;opacity:0;pointer-events:none}
+.excel-dataset-icon{display:grid;place-items:center;width:31px;height:31px;border-radius:9px;background:#eef3f5;color:#527080;font-size:14px;font-weight:900}
+.excel-dataset-icon.income{background:#eaf7ef;color:#1b7d4d}.excel-dataset-icon.expense{background:#fff0ed;color:#b34e43}.excel-dataset-icon.transfer{background:#edf1ff;color:#4965a8}.excel-dataset-icon.tds{background:#fff7e8;color:#9a6c17}.excel-dataset-icon.master{background:#eef6f5;color:#14766d}
+.excel-dataset-copy{display:flex;flex-direction:column;gap:2px;min-width:0}.excel-dataset-copy b{font-size:11px;color:#2d3c50}.excel-dataset-copy small{font-size:9px;color:#7a8896;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.excel-check{margin-left:auto;width:18px;height:18px;display:grid;place-items:center;border-radius:50%;border:1px solid #ccdcd8;color:#fff;font-size:10px;font-weight:900}.selected .excel-check{background:#0c786f;border-color:#0c786f}
+.excel-footer-action{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-top:18px;padding-top:17px;border-top:1px solid #e6edeb}
+.excel-process-rail{display:flex;align-items:center;margin:20px 0 16px;padding:11px 12px;border:1px solid #dce8e5;border-radius:14px;background:#f4f8f7}
+.excel-process-rail>div{display:flex;align-items:center;gap:7px;min-width:0}.excel-process-rail span{width:25px;height:25px;display:grid;place-items:center;border-radius:8px;background:#e1e9e7;color:#6e7d89;font-size:10px;font-weight:900}.excel-process-rail .active span{background:#0c7a70;color:#fff}.excel-process-rail b{font-size:10px;color:#445466}.excel-process-rail small{display:none}.excel-process-rail i{height:1px;flex:1;background:#cfdbd8;margin:0 9px}
+.excel-dropzone{display:flex;align-items:center;gap:13px;min-height:86px;padding:15px;border:1.5px dashed #a9c7c1;border-radius:16px;background:linear-gradient(180deg,#fff,#f8fcfb);cursor:pointer;transition:.16s ease}
+.excel-dropzone.dragging{border-color:#08776d;background:#edf8f5;box-shadow:0 0 0 4px rgba(8,119,109,.08)}.excel-dropzone.has-file{border-style:solid;border-color:#7db7aa;background:#f5fbf9}
+.excel-dropzone input{position:absolute;width:1px;height:1px;opacity:0}.excel-dropzone-icon{width:43px;height:43px;display:grid;place-items:center;border-radius:13px;background:#e5f4f0;color:#0b776e;font-size:21px;font-weight:900;flex:0 0 auto}
+.excel-dropzone>div{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}.excel-dropzone b{font-size:12px;color:#2b3a4e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.excel-dropzone small{font-size:10px;color:#7a8997}
+.excel-browse{border:0;border-radius:9px;padding:8px 11px;background:#edf5f3;color:#0a6d64;font-size:10px;font-weight:900;cursor:pointer;white-space:nowrap}
+.excel-import-note{display:flex;gap:9px;margin-top:13px;padding:10px 12px;border-radius:11px;background:#f2f6f5;color:#627384}.excel-import-note span{color:#0b756c}.excel-import-note p{margin:0;font-size:10px;line-height:1.5}
+.excel-import-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:15px}.excel-import-actions .btn{font-size:11px}
+.excel-validation-card{margin-top:15px;padding:14px;border:1px solid #dce8e5;border-radius:14px;background:#fff}.excel-validation-card.valid{border-color:#b9dfd0;background:#f6fbf8}.excel-validation-card.invalid{border-color:#efc8c2;background:#fff9f8}
+.excel-validation-summary{display:flex;align-items:center;gap:10px}.excel-validation-summary>span{width:30px;height:30px;display:grid;place-items:center;border-radius:50%;background:#e6f4ef;color:#08756c;font-weight:900}.invalid .excel-validation-summary>span{background:#ffe6e2;color:#b8473c}
+.excel-validation-summary div{display:flex;flex-direction:column;gap:2px}.excel-validation-summary b{font-size:12px}.excel-validation-summary small{font-size:10px;color:#738294}.excel-validation-card pre{max-height:170px;overflow:auto;margin:12px 0;padding:10px;border-radius:10px;background:#fff;border:1px solid #f0d9d5;font-size:10px;white-space:pre-wrap}
+.excel-result-strip{display:flex;flex-direction:column;gap:3px;margin-top:13px;padding:11px 12px;border-radius:11px;background:#edf8f3;color:#176a52}.excel-result-strip b{font-size:11px}.excel-result-strip span{font-size:10px}
+.excel-contract-v2{margin-top:18px;padding:22px;border:1px solid #dce7e4;border-radius:20px;background:linear-gradient(145deg,#f9fbfb,#f2f7f6)}
+.excel-contract-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.excel-contract-head h2{margin:4px 0 6px;font-size:22px;color:#27354a}.excel-contract-head p{margin:0;color:#6f7e8e;font-size:12px}.excel-contract-badges{display:flex;gap:7px;flex-wrap:wrap}.excel-contract-badges span{padding:7px 10px;border:1px solid #d9e6e2;border-radius:999px;background:#fff;color:#58707a;font-size:10px;font-weight:800}
+.excel-contract-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}.excel-contract-item{padding:13px;border:1px solid #dfe9e7;border-radius:13px;background:#fff}.excel-contract-item b{display:block;color:#2b3b4e;font-size:12px}.excel-contract-item small{display:block;margin-top:6px;color:#08746b;font-size:9px;font-weight:800}.excel-contract-item p{margin:6px 0 0;color:#7b8996;font-size:10px;line-height:1.4}
+.excel-reconcile-panel,.excel-history-panel{margin-top:18px}.excel-readonly{padding:7px 10px;border-radius:999px;background:#eef4f3;color:#55706d;font-size:9px;font-weight:900;letter-spacing:.1em}
+.excel-empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:50px 20px;color:#758595}.excel-empty-state span{display:grid;place-items:center;width:54px;height:54px;border-radius:17px;background:#eef5f3;color:#0b756c;font-size:24px}.excel-empty-state b{color:#344356;font-size:13px}.excel-empty-state small{font-size:11px;max-width:390px}
+.excel-recon-file{display:flex;align-items:center;gap:12px;margin-top:20px;padding:13px;border:1px solid #dce8e5;border-radius:14px;background:#f7faf9}.excel-recon-file>span{display:grid;place-items:center;width:35px;height:35px;border-radius:10px;background:#e5f3f0;color:#0b756c}.excel-recon-file>div{display:flex;flex-direction:column;gap:2px;flex:1}.excel-recon-file b{font-size:12px;color:#334255}.excel-recon-file small{font-size:10px;color:#778696}.excel-recon-table{margin-top:16px}
+.excel-history-summary{display:flex;align-items:center;gap:12px;margin:19px 0;padding:13px;border-radius:14px;background:#f2f7f5;border:1px solid #dfe9e6}.excel-history-summary>span{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:#fff;color:#0b766d;font-size:17px;font-weight:900;box-shadow:0 2px 7px rgba(12,61,54,.06)}.excel-history-summary div{display:flex;flex-direction:column;gap:2px}.excel-history-summary b{font-size:12px;color:#344356}.excel-history-summary small{font-size:10px;color:#788696}
+.status-pill.completed{background:#e9f7ef;color:#1d7850}.status-pill.failed{background:#fff0ef;color:#b84a42}
+@media(max-width:1100px){.excel-metric-grid{grid-template-columns:repeat(2,1fr)}.excel-workspace-grid{grid-template-columns:1fr}.excel-contract-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:720px){.excel-hero{align-items:flex-start;flex-direction:column}.excel-hero h1{font-size:30px}.excel-hero-controls{justify-content:flex-start}.excel-metric-grid,.excel-dataset-grid,.excel-contract-grid{grid-template-columns:1fr}.excel-process-rail{overflow:auto}.excel-process-rail>div{flex:0 0 auto}.excel-workspace-grid{gap:12px}.excel-panel-card,.excel-contract-v2{padding:16px}.excel-contract-head{flex-direction:column}.excel-dropzone{align-items:flex-start;flex-wrap:wrap}.excel-browse{margin-left:56px}.excel-recon-file{align-items:flex-start;flex-wrap:wrap}.excel-recon-file .btn{margin-left:47px}}
