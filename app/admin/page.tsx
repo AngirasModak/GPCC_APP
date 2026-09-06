@@ -43,6 +43,9 @@ type BankAccount = {
 
 type CashAccount = BankAccount;
 type ExpenseCategory = { id: string; name: string; description: string | null; is_active: boolean; sort_order: number; created_at: string };
+type IncomeTypeMaster = { id:string; name:string; description:string|null; is_active:boolean; sort_order:number };
+type IncomeCategoryMaster = { id:string; income_type_id:string; name:string; description:string|null; requires_flat:boolean; is_active:boolean; sort_order:number };
+type EventMaster = { id:string; name:string; description:string|null; start_date:string|null; end_date:string|null; is_active:boolean };
 type FlatType = "LIG" | "MIG" | "HIG";
 type ResidentialUnit = { id: string; flat_no: string; owner_name: string; flat_type: FlatType | null; has_tenant: boolean; tenant_name: string | null; is_active: boolean; created_at: string; updated_at: string };
 
@@ -119,6 +122,15 @@ export default function AdministrationPage() {
   const [banks, setBanks] = useState<BankAccount[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
+  const [incomeTypes, setIncomeTypes] = useState<IncomeTypeMaster[]>([]);
+  const [incomeCategories, setIncomeCategories] = useState<IncomeCategoryMaster[]>([]);
+  const [eventMasters, setEventMasters] = useState<EventMaster[]>([]);
+  const [incomeTypeForm, setIncomeTypeForm] = useState({ name:"", description:"", is_active:true, sort_order:0 });
+  const [incomeCategoryForm, setIncomeCategoryForm] = useState({ income_type_id:"", name:"", description:"", requires_flat:false, is_active:true, sort_order:0 });
+  const [eventForm, setEventForm] = useState({ name:"", description:"", start_date:"", end_date:"", is_active:true });
+  const [editingIncomeType, setEditingIncomeType] = useState<string|null>(null);
+  const [editingIncomeCategory, setEditingIncomeCategory] = useState<string|null>(null);
+  const [editingEvent, setEditingEvent] = useState<string|null>(null);
   const [residentialUnits, setResidentialUnits] = useState<ResidentialUnit[]>([]);
   const [residentForm, setResidentForm] = useState({ flat_no: "", owner_name: "", flat_type: "" as FlatType | "", has_tenant: false, tenant_name: "", is_active: true });
   const [editingResident, setEditingResident] = useState<string | null>(null);
@@ -176,7 +188,7 @@ export default function AdministrationPage() {
         setSchemaWarning("");
       }
 
-      const [permissionsResult, customRolesResult, customPermissionsResult, banksResult, cashResult, categoriesResult, residentialResult, auditResult] = await Promise.all([
+      const [permissionsResult, customRolesResult, customPermissionsResult, banksResult, cashResult, categoriesResult, incomeTypesResult, incomeCategoriesResult, eventsResult, residentialResult, auditResult] = await Promise.all([
         supabase
           .from("role_permissions")
           .select("role,module,action")
@@ -206,6 +218,9 @@ export default function AdministrationPage() {
           .select("id,name,description,is_active,sort_order,created_at")
           .order("sort_order", { ascending: true })
           .order("name", { ascending: true }),
+        supabase.from("income_types").select("id,name,description,is_active,sort_order").order("sort_order").order("name"),
+        supabase.from("income_categories").select("id,income_type_id,name,description,requires_flat,is_active,sort_order").order("sort_order").order("name"),
+        supabase.from("events").select("id,name,description,start_date,end_date,is_active").order("start_date", { ascending:false }),
         supabase
           .from("residential_units")
           .select("id,flat_no,owner_name,flat_type,has_tenant,tenant_name,is_active,created_at,updated_at")
@@ -241,6 +256,9 @@ export default function AdministrationPage() {
         banksResult.error ||
         cashResult.error ||
         categoriesResult.error ||
+        incomeTypesResult.error ||
+        incomeCategoriesResult.error ||
+        eventsResult.error ||
         residentialResult.error ||
         resolvedAuditResult.error;
       if (firstError) throw new Error(firstError.message);
@@ -255,6 +273,9 @@ export default function AdministrationPage() {
       setBanks((banksResult.data || []) as BankAccount[]);
       setCashAccounts((cashResult.data || []) as CashAccount[]);
       setExpenseCategories((categoriesResult.data || []) as ExpenseCategory[]);
+      setIncomeTypes((incomeTypesResult.data || []) as IncomeTypeMaster[]);
+      setIncomeCategories((incomeCategoriesResult.data || []) as IncomeCategoryMaster[]);
+      setEventMasters((eventsResult.data || []) as EventMaster[]);
       setResidentialUnits((residentialResult.data || []) as ResidentialUnit[]);
       setAuditLogs((resolvedAuditResult.data || []) as AuditLog[]);
     } catch (e: any) {
@@ -546,6 +567,22 @@ export default function AdministrationPage() {
     setCategoryForm({ name: category.name, description: category.description || "", is_active: category.is_active, sort_order: category.sort_order || 0 });
   };
 
+  const submitIncomeType = async () => {
+    if (!incomeTypeForm.name.trim()) { setError("Income Type name is required."); return; }
+    setBusy(true); clearFeedback();
+    try { const payload={...incomeTypeForm,name:incomeTypeForm.name.trim(),description:incomeTypeForm.description.trim()||null,sort_order:Number(incomeTypeForm.sort_order||0)}; const q=editingIncomeType?supabase.from("income_types").update(payload).eq("id",editingIncomeType):supabase.from("income_types").insert(payload); const {error}=await q; if(error) throw new Error(error.message); setIncomeTypeForm({name:"",description:"",is_active:true,sort_order:0}); setEditingIncomeType(null); setMessage("Income Type saved."); await loadAll(); } catch(e:any){setError(e?.message||"Unable to save Income Type.");} finally {setBusy(false);}
+  };
+  const submitIncomeCategory = async () => {
+    if (!incomeCategoryForm.income_type_id || !incomeCategoryForm.name.trim()) { setError("Income Type and Category name are required."); return; }
+    setBusy(true); clearFeedback();
+    try { const payload={...incomeCategoryForm,name:incomeCategoryForm.name.trim(),description:incomeCategoryForm.description.trim()||null,sort_order:Number(incomeCategoryForm.sort_order||0)}; const q=editingIncomeCategory?supabase.from("income_categories").update(payload).eq("id",editingIncomeCategory):supabase.from("income_categories").insert(payload); const {error}=await q; if(error) throw new Error(error.message); setIncomeCategoryForm({income_type_id:"",name:"",description:"",requires_flat:false,is_active:true,sort_order:0}); setEditingIncomeCategory(null); setMessage("Income Category saved."); await loadAll(); } catch(e:any){setError(e?.message||"Unable to save Income Category.");} finally {setBusy(false);}
+  };
+  const submitEventMaster = async () => {
+    if (!eventForm.name.trim()) { setError("Event / Campaign name is required."); return; }
+    setBusy(true); clearFeedback();
+    try { const payload={...eventForm,name:eventForm.name.trim(),description:eventForm.description.trim()||null,start_date:eventForm.start_date||null,end_date:eventForm.end_date||null}; const q=editingEvent?supabase.from("events").update(payload).eq("id",editingEvent):supabase.from("events").insert(payload); const {error}=await q; if(error) throw new Error(error.message); setEventForm({name:"",description:"",start_date:"",end_date:"",is_active:true}); setEditingEvent(null); setMessage("Event / Campaign saved."); await loadAll(); } catch(e:any){setError(e?.message||"Unable to save Event / Campaign.");} finally {setBusy(false);}
+  };
+
   const startEditAccount = (kind: "bank" | "cash", account: BankAccount) => {
     setAccountKind(kind);
     setEditingAccount(account.id);
@@ -828,6 +865,25 @@ export default function AdministrationPage() {
                   </div>)}
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div className="card admin-category-card">
+            <div className="admin-category-hero"><div className="admin-category-hero-icon">₹</div><div className="admin-category-hero-copy"><div className="excel-kicker">INCOME MASTER</div><h3>Income Types, Categories & Events</h3><p>Control subscriptions, puja collections, donations, sponsorship tiers and event-linked income.</p></div><div className="admin-category-metrics"><div><strong>{incomeTypes.filter(x=>x.is_active).length}</strong><span>Types</span></div><div className="active"><strong>{incomeCategories.filter(x=>x.is_active).length}</strong><span>Categories</span></div><div><strong>{eventMasters.filter(x=>x.is_active).length}</strong><span>Events</span></div></div></div>
+            <div className="admin-category-body">
+              <div className="admin-category-editor">
+                <div className="admin-category-editor-head"><div><span className="admin-form-step">01</span><div><h4>{editingIncomeType?"Edit Income Type":"Create Income Type"}</h4><p>Sponsorship is maintained as a first-class income type.</p></div></div></div>
+                <label><span>Income Type</span><input className="input" placeholder="e.g. Sponsorship" value={incomeTypeForm.name} onChange={e=>setIncomeTypeForm({...incomeTypeForm,name:e.target.value})}/></label><label><span>Description</span><input className="input" value={incomeTypeForm.description} onChange={e=>setIncomeTypeForm({...incomeTypeForm,description:e.target.value})}/></label><label><span>Display order</span><input className="input" type="number" value={incomeTypeForm.sort_order} onChange={e=>setIncomeTypeForm({...incomeTypeForm,sort_order:Number(e.target.value||0)})}/></label><label className="category-active-toggle"><input type="checkbox" checked={incomeTypeForm.is_active} onChange={e=>setIncomeTypeForm({...incomeTypeForm,is_active:e.target.checked})}/><span><b>Active Income Type</b><small>Available in Add Income</small></span></label><div className="actions"><button className="btn" disabled={busy} onClick={submitIncomeType}>{editingIncomeType?"Save Type":"Add Income Type"}</button>{editingIncomeType&&<button className="btn secondary" onClick={()=>{setEditingIncomeType(null);setIncomeTypeForm({name:"",description:"",is_active:true,sort_order:0});}}>Cancel</button>}</div>
+              </div>
+              <div className="admin-category-library"><div className="admin-category-library-head"><div><h4>Income Type library</h4><p>Includes Subscription, Puja Contribution, Donation and Sponsorship.</p></div></div><div className="category-list">{incomeTypes.map(t=><div className={`category-list-item ${!t.is_active?"archived":""}`} key={t.id}><div className="category-list-main"><div className="category-number">₹</div><div><div className="category-title-row"><b>{t.name}</b><span className={`category-status ${t.is_active?"active":"archived"}`}>{t.is_active?"Active":"Archived"}</span></div><small>{t.description||"No description"}</small></div></div><div className="account-row-actions"><button className="btn secondary small-btn" onClick={()=>{setEditingIncomeType(t.id);setIncomeTypeForm({name:t.name,description:t.description||"",is_active:t.is_active,sort_order:t.sort_order});}}>Edit</button></div></div>)}</div></div>
+            </div>
+            <div className="admin-category-body" style={{marginTop:16}}>
+              <div className="admin-category-editor"><div className="admin-category-editor-head"><div><span className="admin-form-step">02</span><div><h4>{editingIncomeCategory?"Edit Income Category":"Create Income Category"}</h4><p>Set whether a category requires a Flat / House selection.</p></div></div></div><label><span>Income Type</span><select className="input" value={incomeCategoryForm.income_type_id} onChange={e=>setIncomeCategoryForm({...incomeCategoryForm,income_type_id:e.target.value})}><option value="">Select Income Type</option>{incomeTypes.filter(t=>t.is_active).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label><span>Category Name</span><input className="input" placeholder="e.g. Gold Sponsor" value={incomeCategoryForm.name} onChange={e=>setIncomeCategoryForm({...incomeCategoryForm,name:e.target.value})}/></label><label><span>Description</span><input className="input" value={incomeCategoryForm.description} onChange={e=>setIncomeCategoryForm({...incomeCategoryForm,description:e.target.value})}/></label><label className="category-active-toggle"><input type="checkbox" checked={incomeCategoryForm.requires_flat} onChange={e=>setIncomeCategoryForm({...incomeCategoryForm,requires_flat:e.target.checked})}/><span><b>Requires Flat / House</b><small>Show residential selection in Add Income</small></span></label><div className="actions"><button className="btn" disabled={busy} onClick={submitIncomeCategory}>{editingIncomeCategory?"Save Category":"Add Income Category"}</button></div></div>
+              <div className="admin-category-library"><div className="admin-category-library-head"><div><h4>Income Category library</h4><p>Categories are filtered by Income Type in Add Income.</p></div></div><div className="category-list">{incomeCategories.map(c=><div className={`category-list-item ${!c.is_active?"archived":""}`} key={c.id}><div className="category-list-main"><div className="category-number">{c.requires_flat?"⌂":"₹"}</div><div><div className="category-title-row"><b>{c.name}</b><span className={`category-status ${c.is_active?"active":"archived"}`}>{c.is_active?"Active":"Archived"}</span></div><small>{incomeTypes.find(t=>t.id===c.income_type_id)?.name||"Unknown Type"} · {c.requires_flat?"Flat required":"No flat required"}</small></div></div><div className="account-row-actions"><button className="btn secondary small-btn" onClick={()=>{setEditingIncomeCategory(c.id);setIncomeCategoryForm({income_type_id:c.income_type_id,name:c.name,description:c.description||"",requires_flat:c.requires_flat,is_active:c.is_active,sort_order:c.sort_order});}}>Edit</button></div></div>)}</div></div>
+            </div>
+            <div className="admin-category-body" style={{marginTop:16}}>
+              <div className="admin-category-editor"><div className="admin-category-editor-head"><div><span className="admin-form-step">03</span><div><h4>{editingEvent?"Edit Event / Campaign":"Add Event / Campaign"}</h4><p>Optional linkage for sponsorship, puja and event contributions.</p></div></div></div><label><span>Event / Campaign Name</span><input className="input" placeholder="e.g. Durga Puja 2026" value={eventForm.name} onChange={e=>setEventForm({...eventForm,name:e.target.value})}/></label><label><span>Description</span><input className="input" value={eventForm.description} onChange={e=>setEventForm({...eventForm,description:e.target.value})}/></label><div className="formGrid"><label>Start date<input className="input" type="date" value={eventForm.start_date} onChange={e=>setEventForm({...eventForm,start_date:e.target.value})}/></label><label>End date<input className="input" type="date" value={eventForm.end_date} onChange={e=>setEventForm({...eventForm,end_date:e.target.value})}/></label></div><div className="actions"><button className="btn" disabled={busy} onClick={submitEventMaster}>{editingEvent?"Save Event":"Add Event"}</button></div></div>
+              <div className="admin-category-library"><div className="admin-category-library-head"><div><h4>Event / Campaign library</h4><p>Available for optional income linkage.</p></div></div><div className="category-list">{eventMasters.length===0?<div className="category-empty"><b>No events configured</b><span>Add events when sponsorship or collections need event-wise reporting.</span></div>:eventMasters.map(ev=><div className="category-list-item" key={ev.id}><div className="category-list-main"><div className="category-number">★</div><div><div className="category-title-row"><b>{ev.name}</b></div><small>{ev.start_date||"No start date"}{ev.end_date?` → ${ev.end_date}`:""}</small></div></div><div className="account-row-actions"><button className="btn secondary small-btn" onClick={()=>{setEditingEvent(ev.id);setEventForm({name:ev.name,description:ev.description||"",start_date:ev.start_date||"",end_date:ev.end_date||"",is_active:ev.is_active});}}>Edit</button></div></div>)}</div></div>
             </div>
           </div>
 
