@@ -101,3 +101,46 @@
 .resident-import-steps{display:flex;align-items:center;padding:14px 20px;background:#f1f7f5;border-bottom:1px solid #e1ece9}.resident-import-step{display:flex;align-items:center;gap:8px;min-width:0}.resident-import-step span{width:28px;height:28px;display:grid;place-items:center;border-radius:9px;background:#dce8e5;color:#65757f;font-size:10px;font-weight:900}.resident-import-step.active span{background:#0e8177;color:white;box-shadow:0 4px 10px rgba(14,129,119,.18)}.resident-import-step div{display:flex;flex-direction:column;gap:1px}.resident-import-step b{font-size:11px;color:#31465a}.resident-import-step small{font-size:9px;color:#7b8997}.resident-import-connector{height:1px;flex:1;background:#ccdcd8;margin:0 10px;min-width:10px}
 .resident-import-panel .resident-import-box{margin:16px;border:1px solid #d9e7e3;border-radius:16px;padding:16px;background:white}.resident-import-head{margin-bottom:14px!important}.resident-import-head b{font-size:13px}.resident-import-head small{font-size:10px;line-height:1.5}.resident-dropzone{min-height:76px;padding:14px 16px!important;border:1.5px dashed #a9c4be!important;background:linear-gradient(180deg,#ffffff,#f8fcfb)!important}.resident-dropzone.has-file{border-color:#74b9af!important;background:#f5fbf9!important}.resident-dropzone-icon{width:42px;height:42px;border-radius:12px!important;background:#e5f4f0!important}.resident-import-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:14px;flex-wrap:wrap}.resident-preview{box-shadow:0 4px 16px rgba(12,61,54,.05)}.resident-preview-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.resident-preview-summary>div:first-child{display:flex;align-items:center;gap:10px}.preview-check{width:30px;height:30px;display:grid;place-items:center;border-radius:50%;background:#e4f5ef;color:#08756b;font-weight:900}.resident-preview-summary small{display:block;color:#718094;margin-top:2px}
 @media(max-width:720px){.resident-import-titlebar{flex-direction:column}.resident-import-steps{display:grid;grid-template-columns:1fr 1fr;gap:10px}.resident-import-connector{display:none}.resident-import-panel .resident-import-box{margin:10px}.resident-import-actions{justify-content:stretch}.resident-import-actions .btn{flex:1}}
+
+/* Income occupancy selector */
+.tenantOccupiedControl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tenantCheckboxRow {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(20, 86, 78, 0.14);
+  border-radius: 12px;
+  background: rgba(20, 86, 78, 0.035);
+}
+
+.tenantCheckboxRow input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #17685f;
+  cursor: pointer;
+}
+
+.tenantCheckboxRow input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.tenantCheckboxRow > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tenantCheckboxRow small {
+  font-size: 11px;
+  font-weight: 400;
+}

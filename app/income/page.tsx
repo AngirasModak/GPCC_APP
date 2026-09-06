@@ -41,6 +41,7 @@ export default function Income() {
   const [msg, setMsg] = useState("");
   const [residences, setResidences] = useState<ResidentialUnit[]>([]);
   const [flatTypeFilter, setFlatTypeFilter] = useState<FlatType | "">("");
+  const [tenantOccupied, setTenantOccupied] = useState(false);
 
   const load = async () => {
     setMsg("");
@@ -68,18 +69,53 @@ export default function Income() {
     setResidences((data || []) as ResidentialUnit[]);
   };
 
-  const filteredResidences = flatTypeFilter ? residences.filter((r) => r.flat_type === flatTypeFilter) : residences;
+  // A flat is intentionally unavailable until the user selects LIG, MIG or HIG.
+  // When "Tenant Occupied" is checked, only active flats with a registered tenant
+  // are offered and the contributor is populated with the tenant name.
+  const filteredResidences = !flatTypeFilter
+    ? []
+    : residences.filter((r) => {
+        const matchesType = r.flat_type === flatTypeFilter;
+        const matchesOccupancy = !tenantOccupied || Boolean(r.has_tenant && r.tenant_name?.trim());
+        return matchesType && matchesOccupancy;
+      });
+
+  const contributorFor = (unit: ResidentialUnit | undefined, useTenant: boolean) => {
+    if (!unit) return "";
+    return useTenant && unit.has_tenant && unit.tenant_name?.trim()
+      ? unit.tenant_name.trim()
+      : unit.owner_name;
+  };
 
   const onFlatTypeChange = (type: FlatType | "") => {
     setFlatTypeFilter(type);
-    if (form.flat_no && type && !residences.some((r) => r.flat_no === form.flat_no && r.flat_type === type)) {
-      setForm({ ...form, flat_no: "" });
+    // Changing the category always clears the old flat because it may belong
+    // to another category and its contributor may no longer be valid.
+    setForm({ ...form, flat_no: "", contributor: "" });
+  };
+
+  const onTenantOccupiedChange = (checked: boolean) => {
+    setTenantOccupied(checked);
+    const selectedUnit = residences.find((r) => r.flat_no === form.flat_no);
+
+    // If the current flat has no tenant, clear it when switching to tenant mode.
+    if (checked && selectedUnit && !(selectedUnit.has_tenant && selectedUnit.tenant_name?.trim())) {
+      setForm({ ...form, flat_no: "", contributor: "" });
+      return;
+    }
+
+    if (selectedUnit) {
+      setForm({ ...form, contributor: contributorFor(selectedUnit, checked) });
     }
   };
 
   const onFlatChange = (flat: string) => {
-    const unit = residences.find(r => r.flat_no === flat);
-    setForm({ ...form, flat_no: flat, contributor: unit ? (unit.has_tenant && unit.tenant_name ? unit.tenant_name : unit.owner_name) : form.contributor });
+    const unit = residences.find((r) => r.flat_no === flat);
+    setForm({
+      ...form,
+      flat_no: flat,
+      contributor: contributorFor(unit, tenantOccupied),
+    });
   };
 
   const save = async () => {
@@ -223,6 +259,8 @@ export default function Income() {
           onClick={() => {
             setEditing(null);
             setForm(initial);
+            setFlatTypeFilter("");
+            setTenantOccupied(false);
             setOpen(true);
           }}
         >
@@ -424,23 +462,69 @@ export default function Income() {
 
               <label>
                 Flat Category
-                <select className="input" value={flatTypeFilter} onChange={(e) => onFlatTypeChange(e.target.value as FlatType | "")}>
-                  <option value="">All Flat Categories</option>
+                <select
+                  className="input"
+                  value={flatTypeFilter}
+                  onChange={(e) => onFlatTypeChange(e.target.value as FlatType | "")}
+                >
+                  <option value="">Select Flat Category</option>
                   <option value="LIG">LIG</option>
                   <option value="MIG">MIG</option>
                   <option value="HIG">HIG</option>
                 </select>
-                <small className="muted">Choose LIG, MIG or HIG to filter the Flat / House list.</small>
+                <small className="muted">Select a category first. Only flats from that category will become available.</small>
+              </label>
+
+              <label className="tenantOccupiedControl">
+                <span>Occupancy</span>
+                <span className="tenantCheckboxRow">
+                  <input
+                    type="checkbox"
+                    checked={tenantOccupied}
+                    onChange={(e) => onTenantOccupiedChange(e.target.checked)}
+                    disabled={!flatTypeFilter}
+                  />
+                  <span>
+                    Tenant Occupied
+                    <small className="muted">Show tenant name instead of owner name</small>
+                  </span>
+                </span>
               </label>
 
               <label>
                 Flat / House No.
-                <select className="input" value={form.flat_no} onChange={(e) => onFlatChange(e.target.value)} disabled={!residences.length}>
-                  <option value="">{flatTypeFilter ? `Select ${flatTypeFilter} Flat / House` : "Select Flat / House No."}</option>
-                  {filteredResidences.map((r) => <option key={r.id} value={r.flat_no}>{r.flat_no} — {r.has_tenant && r.tenant_name ? r.tenant_name : r.owner_name}</option>)}
+                <select
+                  className="input"
+                  value={form.flat_no}
+                  onChange={(e) => onFlatChange(e.target.value)}
+                  disabled={!flatTypeFilter || !residences.length}
+                >
+                  <option value="">
+                    {!flatTypeFilter
+                      ? "Select Flat Category first"
+                      : tenantOccupied
+                      ? `Select ${flatTypeFilter} Flat / House (Tenant)`
+                      : `Select ${flatTypeFilter} Flat / House`}
+                  </option>
+                  {flatTypeFilter && filteredResidences.map((r) => (
+                    <option key={r.id} value={r.flat_no}>
+                      {r.flat_no} — {tenantOccupied ? r.tenant_name : r.owner_name}
+                    </option>
+                  ))}
                 </select>
-                {residences.length === 0 && <small className="muted">No active residences configured. Ask an Administrator to add/import the Flat / House Directory.</small>}
-                {residences.length > 0 && filteredResidences.length === 0 && <small className="muted">No active flats are configured for {flatTypeFilter}.</small>}
+                {!flatTypeFilter && (
+                  <small className="muted">Choose Flat Category before selecting a Flat / House No.</small>
+                )}
+                {residences.length === 0 && (
+                  <small className="muted">No active residences configured. Ask an Administrator to add/import the Flat / House Directory.</small>
+                )}
+                {flatTypeFilter && residences.length > 0 && filteredResidences.length === 0 && (
+                  <small className="muted">
+                    {tenantOccupied
+                      ? `No tenant-occupied ${flatTypeFilter} flats are configured.`
+                      : `No active flats are configured for ${flatTypeFilter}.`}
+                  </small>
+                )}
               </label>
 
               <label>
