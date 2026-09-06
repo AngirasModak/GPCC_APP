@@ -144,3 +144,7 @@
   font-size: 11px;
   font-weight: 400;
 }
+
+
+/* V27 Event & Expenditure Governance */
+.modal.modalWide{width:min(900px,94vw);max-height:90vh;overflow:auto}.formSection{margin-top:16px;padding:16px;border:1px solid #e5ecea;border-radius:14px;background:linear-gradient(180deg,#fbfdfd,#f7faf9)}.formSectionTitle{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#0f766e;margin-bottom:14px}.formSection .formGrid{margin-bottom:0}.field-hint{font-size:11px;color:#6b7280}.formSection label{font-weight:600;color:#475569}.formSection label .input{margin-top:6px;font-weight:400;color:#172033}
