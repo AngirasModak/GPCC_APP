@@ -15,6 +15,7 @@ const items = [
   ["/petty-cash", "💵", "Petty Cash", "petty_cash", "view"],
   ["/bank-transfers", "🏦", "Bank & Transfers", "bank_transfers", "view"],
   ["/reports", "📊", "Reports & Analytics", "reports", "view"],
+  ["/puja-contribution", "🪔", "Puja Contribution Intelligence", "puja_contribution", "view"],
   ["/excel", "📁", "Excel Centre", "excel", "view"],
   ["/admin", "👥", "Administration", "admin", "view"],
 ] as const;

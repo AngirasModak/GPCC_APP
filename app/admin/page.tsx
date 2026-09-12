@@ -76,6 +76,7 @@ const moduleActions: Record<string, string[]> = {
   petty_cash: ["view", "create", "update", "delete"],
   bank_transfers: ["view", "create", "update", "delete"],
   reports: ["view"],
+  puja_contribution: ["view"],
   excel: ["view", "import"],
   admin: ["view"],
   users: ["manage"],
