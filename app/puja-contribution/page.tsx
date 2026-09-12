@@ -19,10 +19,43 @@ export default function PujaContribution(){
  const eventIncome=useMemo(()=>income.filter(x=>!eventId||x.event_id===eventId),[income,eventId]);
  const ownerCounts=useMemo(()=>{const m=new Map<string,number>();units.forEach(u=>m.set(key(u.owner_name),(m.get(key(u.owner_name))||0)+1));return m},[units]);
  const rows=useMemo(()=>units.filter(u=>(type==="All"||u.flat_type===type)&& (ownerMode==="All"||(ownerMode==="Multiple"?(ownerCounts.get(key(u.owner_name))||0)>1:(ownerCounts.get(key(u.owner_name))||0)<=1))).map(u=>{
-   const pol=policies.find(p=>p.event_id===eventId&&p.flat_type===u.flat_type&&p.is_active);const standard=Number(pol?.standard_amount||0),discount=Number(pol?.early_payment_discount||0),deadline=pol?.discount_deadline||null; const payments=eventIncome.filter(x=>x.flat_no===u.flat_no).sort((a,b)=>String(a.date).localeCompare(String(b.date)));const paid=payments.reduce((s,x)=>s+Number(x.amount||0),0);const contributorSource=payments.length?payments.reduce((m:any,x)=>{const v=key(x.contributor_source)==="tenant"?"Tenant":"Owner";m[v]=(m[v]||0)+1;return m},{}) : null; const actualSource=contributorSource?(contributorSource.Tenant>contributorSource.Owner?"Tenant":"Owner"):(u.has_tenant?"Tenant":"Owner"); const first=payments[0]?.date||null; const before=deadline&&first?String(first)<=String(deadline):false; const discountEligible=!!deadline&&paid>=standard-discount&&before; const availed=discountEligible?discount:0;const net=standard-availed;const outstanding=Math.max(0,net-paid);const status=paid<=0?"Unpaid":outstanding>0.01?"Partial":"Paid";return {...u,standard,discount,availed,net,paid,outstanding,status,source:actualSource,payments,flatCount:ownerCounts.get(key(u.owner_name))||1};}).filter(r=>source==="All"||r.source===source),[units,type,ownerMode,policies,eventId,eventIncome,ownerCounts,source]);
+   const pol=policies.find(p=>p.event_id===eventId&&p.flat_type===u.flat_type&&p.is_active);
+   const standard=Number(pol?.standard_amount||0),discount=Number(pol?.early_payment_discount||0),deadline=pol?.discount_deadline||null;
+   const payments=eventIncome.filter(x=>x.flat_no===u.flat_no).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+
+   // Manual/legacy entries often store contributor_source as "Resident".
+   // Resolve Owner vs Tenant primarily from the contributor name, then from an
+   // explicit Owner/Tenant source, and only then from current unit occupancy.
+   const paymentSource=(x:Income):"Owner"|"Tenant"=>{
+     const contributor=key(x.contributor);
+     const owner=key(u.owner_name);
+     const tenant=key(u.tenant_name||"");
+     if(tenant&&contributor===tenant) return "Tenant";
+     if(owner&&contributor===owner) return "Owner";
+     const declared=key(x.contributor_source);
+     if(declared==="tenant") return "Tenant";
+     if(declared==="owner") return "Owner";
+     return u.has_tenant ? "Tenant" : "Owner";
+   };
+   const paidOwner=payments.filter(x=>paymentSource(x)==="Owner").reduce((s,x)=>s+Number(x.amount||0),0);
+   const paidTenant=payments.filter(x=>paymentSource(x)==="Tenant").reduce((s,x)=>s+Number(x.amount||0),0);
+   const paid=paidOwner+paidTenant;
+   const actualSource=paidTenant>paidOwner?"Tenant":paidOwner>0?"Owner":(u.has_tenant?"Tenant":"Owner");
+   const first=payments[0]?.date||null;
+   const before=deadline&&first?String(first)<=String(deadline):false;
+   const discountEligible=!!deadline&&paid>=standard-discount&&before;
+   const availed=discountEligible?discount:0;
+   const net=standard-availed;
+   const outstanding=Math.max(0,net-paid);
+   const status=paid<=0?"Unpaid":outstanding>0.01?"Partial":"Paid";
+   return {...u,standard,discount,availed,net,paid,paidOwner,paidTenant,outstanding,status,source:actualSource,payments,flatCount:ownerCounts.get(key(u.owner_name))||1};
+ }).filter(r=>source==="All"||r.source===source),[units,type,ownerMode,policies,eventId,eventIncome,ownerCounts,source]);
  const kpi=useMemo(()=>({gross:rows.reduce((s,r)=>s+r.standard,0),discount:rows.reduce((s,r)=>s+r.availed,0),net:rows.reduce((s,r)=>s+r.net,0),paid:rows.reduce((s,r)=>s+r.paid,0),out:rows.reduce((s,r)=>s+r.outstanding,0),paidFlats:rows.filter(r=>r.status==="Paid").length,partial:rows.filter(r=>r.status==="Partial").length,unpaid:rows.filter(r=>r.status==="Unpaid").length}),[rows]);
  const byType=["HIG","MIG","LIG"].map(name=>{const x=rows.filter(r=>r.flat_type===name);return {name,Collected:x.reduce((s,r)=>s+r.paid,0),Outstanding:x.reduce((s,r)=>s+r.outstanding,0),"Collection %":x.reduce((s,r)=>s+r.net,0)?Math.round(x.reduce((s,r)=>s+r.paid,0)/x.reduce((s,r)=>s+r.net,0)*100):0};});
- const bySource=["Owner","Tenant"].map(name=>{const x=rows.filter(r=>r.source===name);return {name,value:x.reduce((s,r)=>s+r.paid,0),flats:x.length};});
+ const bySource=["Owner","Tenant"].map(name=>{
+   const x=rows.filter(r=>r.source===name);
+   return {name,value:x.reduce((s,r)=>s+(name==="Tenant"?r.paidTenant:r.paidOwner),0),flats:x.length};
+ });
  const multi=useMemo(()=>{const map=new Map<string,any>();rows.forEach(r=>{const x=map.get(key(r.owner_name))||{owner:r.owner_name,flats:0,gross:0,paid:0,out:0};x.flats++;x.gross+=r.standard;x.paid+=r.paid;x.out+=r.outstanding;map.set(key(r.owner_name),x)});return [...map.values()].filter(x=>x.flats>1).sort((a,b)=>b.out-a.out)},[rows]);
  const policyFor=(ft:"HIG"|"MIG"|"LIG")=>policies.find(p=>p.event_id===eventId&&p.flat_type===ft)||{event_id:eventId,flat_type:ft,standard_amount:0,early_payment_discount:0,discount_deadline:null,is_active:true};
  const savePolicy=async(ft:"HIG"|"MIG"|"LIG")=>{const p=policyFor(ft);if(!eventId){setMsg("Select an event first.");return;}const payload={...p,event_id:eventId,flat_type:ft,standard_amount:Number(p.standard_amount),early_payment_discount:Number(p.early_payment_discount),discount_deadline:p.discount_deadline||null,is_active:true};delete (payload as any).id;const {error}=await supabase.from("puja_contribution_policies").upsert(payload,{onConflict:"event_id,flat_type"});setMsg(error?error.message:"Contribution policy saved.");if(!error)void load()};
