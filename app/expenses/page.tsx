@@ -31,6 +31,7 @@ export default function ExpensesPage() {
   const [categories,setCategories]=useState<{id:string;name:string;is_active:boolean}[]>([]);
   const [events,setEvents]=useState<EventMaster[]>([]);
   const [people,setPeople]=useState<Profile[]>([]);
+  const [eventFilter,setEventFilter]=useState(""); const [categoryFilter,setCategoryFilter]=useState(""); const [statusFilter,setStatusFilter]=useState("");
 
   const load=async()=>{
     setMsg("");
@@ -78,12 +79,15 @@ export default function ExpensesPage() {
   const edit=(r:Expense)=>{setEditing(r.id);setForm({...freshBlank(),...r,beneficiary_pan:r.beneficiary_pan||"",event_id:r.event_id||"",responsible_person_id:r.responsible_person_id||"",responsible_person_name:r.responsible_person_name||"",gross_amount:String(r.gross_amount),tds_rate:String(r.tds_rate),bill_date:r.bill_date||"",payment_date:r.payment_date||""});setOpen(true);};
   const del=async(id:string)=>{if(!confirm("Delete this expenditure entry?"))return;const {error}=await supabase.from("expenses").update({deleted_at:new Date().toISOString()}).eq("id",id);if(error)setMsg(error.message);else load();};
 
-  const paidRows=rows.filter(r=>String(r.status).toLowerCase()==="paid");
+  const filteredRows=useMemo(()=>rows.filter(r=>(!eventFilter||(r.event_id||"__general__")===eventFilter)&&(!categoryFilter||(r.category||"")===categoryFilter)&&(!statusFilter||String(r.status)===statusFilter)),[rows,eventFilter,categoryFilter,statusFilter]);
+  const paidRows=filteredRows.filter(r=>String(r.status).toLowerCase()==="paid");
   const totalGross=paidRows.reduce((s,r)=>s+Number(r.gross_amount||0),0);
   const totalTds=paidRows.reduce((s,r)=>s+Number(r.tds_amount||0),0);
   const totalNet=paidRows.reduce((s,r)=>s+Number(r.net_amount||0),0);
   const pettyCashExpense=paidRows.filter(r=>String(r.payment_mode).toLowerCase()==="petty cash").reduce((s,r)=>s+Number(r.net_amount||0),0);
   const bankExpense=totalNet-pettyCashExpense;
+  const rowCategories=Array.from(new Set(rows.map(r=>r.category).filter(Boolean) as string[])).sort(); const rowStatuses=Array.from(new Set(rows.map(r=>r.status).filter(Boolean))).sort();
+  const clearFilters=()=>{setEventFilter("");setCategoryFilter("");setStatusFilter("");};
 
   return <div>
     <div className="pageHead"><div><h1>Expenditure & TDS</h1><p className="muted">Track expenditure, accountability, beneficiaries and event / campaign financial impact.</p></div>
@@ -93,8 +97,13 @@ export default function ExpensesPage() {
       <Metric label="Bank Paid" value={money(bankExpense)}/><Metric label="Petty Cash Paid" value={money(pettyCashExpense)}/>
     </div>
     {msg&&<div className="card" style={{marginBottom:14,color:"#b42318"}}>{msg}</div>}
+    <div className="card record-filter-card"><div className="record-filter-head"><div><h3>Filter Expenditure Records</h3><p className="muted">Focus the expenditure register and summary cards by event / campaign, category and payment status.</p></div><button className="btn secondary small-btn" onClick={clearFilters}>Reset filters</button></div><div className="record-filter-grid expense-filter-grid">
+      <label>Event / Campaign<select className="input" value={eventFilter} onChange={e=>setEventFilter(e.target.value)}><option value="">All Events / Campaigns</option><option value="__general__">General / Non-event</option>{events.map(ev=><option key={ev.id} value={ev.id}>{ev.name}</option>)}</select></label>
+      <label>Category<select className="input" value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="">All Categories</option>{rowCategories.map(c=><option key={c} value={c}>{c}</option>)}</select></label>
+      <label>Status<select className="input" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All Statuses</option>{rowStatuses.map(st=><option key={st} value={st}>{st}</option>)}</select></label>
+    </div><div className="record-filter-count">Showing <b>{filteredRows.length}</b> of <b>{rows.length}</b> expenditure records</div></div>
     <div className="card tableWrap"><table className="table"><thead><tr><th>Date</th><th>Event / Campaign</th><th>Category</th><th>In favour of M/S</th><th>Responsible</th><th>Gross</th><th>Net Paid</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>{rows.length?rows.map(r=>{const ev=events.find(e=>e.id===r.event_id);return <tr key={r.id}><td>{r.date}</td><td>{ev?.name||"General / Non-event"}</td><td>{r.category||"-"}</td><td><b>{r.vendor}</b>{r.beneficiary_pan&&<small style={{display:"block"}}>PAN: {r.beneficiary_pan}</small>}</td><td>{r.responsible_person_name||"-"}</td><td>{money(r.gross_amount)}</td><td>{money(r.net_amount)}</td><td><span className="status">{r.status}</span></td><td className="actions"><button className="btn secondary" onClick={()=>edit(r)}>Edit</button><button className="btn danger" onClick={()=>del(r.id)}>Delete</button></td></tr>}):<tr><td colSpan={9} className="empty">No expenditure entries yet.</td></tr>}</tbody>
+      <tbody>{filteredRows.length?filteredRows.map(r=>{const ev=events.find(e=>e.id===r.event_id);return <tr key={r.id}><td>{r.date}</td><td>{ev?.name||"General / Non-event"}</td><td>{r.category||"-"}</td><td><b>{r.vendor}</b>{r.beneficiary_pan&&<small style={{display:"block"}}>PAN: {r.beneficiary_pan}</small>}</td><td>{r.responsible_person_name||"-"}</td><td>{money(r.gross_amount)}</td><td>{money(r.net_amount)}</td><td><span className="status">{r.status}</span></td><td className="actions"><button className="btn secondary small-btn" onClick={()=>edit(r)}>Edit</button><button className="btn danger small-btn" onClick={()=>del(r.id)}>Delete</button></td></tr>}):<tr><td colSpan={9} className="empty">No expenditure entries match the selected filters.</td></tr>}</tbody>
     </table></div>
 
     {open&&<div className="modalBg"><div className="modal modalWide">
